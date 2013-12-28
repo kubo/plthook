@@ -1,5 +1,11 @@
 /* -*- indent-tabs-mode: nil -*-
  *
+ * plthook.h -- the header file of plthook
+ *
+ * URL: https://github.com/kubo/plthook
+ *
+ * ------------------------------------------------------
+ *
  * Copyright 2013 Kubo Takehiro <kubo@jiubao.org>
  *
  * Redistribution and use in source and binary forms, with or without modification, are

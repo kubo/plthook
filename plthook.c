@@ -1,5 +1,11 @@
 /* -*- indent-tabs-mode: nil -*-
  *
+ * plthook.c -- implemention of plthook for ELF format
+ *
+ * URL: https://github.com/kubo/plthook
+ *
+ * ------------------------------------------------------
+ *
  * Copyright 2013 Kubo Takehiro <kubo@jiubao.org>
  *
  * Redistribution and use in source and binary forms, with or without modification, are
@@ -39,6 +45,10 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <dlfcn.h>
+#ifdef __sun
+#include <procfs.h>
+#define ELF_TARGET_ALL
+#endif /* __sun */
 #include <elf.h>
 #include <link.h>
 #include "plthook.h"
@@ -47,29 +57,45 @@
 #define __attribute__(arg)
 #endif
 
-#if defined __linux__ && defined __x86_64__
-#define ELF_CLASS     ELFCLASS64
-#define ELF_DATA      ELFDATA2LSB
+#if defined __linux__
 #define ELF_OSABI     ELFOSABI_SYSV
-#define E_MACHINE     EM_X86_64
-#define R_JUMP_SLOT   R_X86_64_JUMP_SLOT
-#define PLT_SECTION_NAME ".rela.plt"
-#define SHT_PLT_REL   SHT_RELA
-#define Elf_Plt_Rel   Elf_Rela
-#elif defined __linux__ && defined __i386__
-#define ELF_CLASS     ELFCLASS32
-#define ELF_DATA      ELFDATA2LSB
-#define ELF_OSABI     ELFOSABI_SYSV
-#define E_MACHINE     EM_386
-#define R_JUMP_SLOT   R_386_JMP_SLOT
-#define PLT_SECTION_NAME ".rel.plt"
-#define SHT_PLT_REL   SHT_REL
-#define Elf_Plt_Rel   Elf_Rel
+#elif defined __sun
+#define ELF_OSABI     ELFOSABI_SOLARIS
+#elif defined __FreeBSD__
+#define ELF_OSABI     ELFOSABI_FREEBSD
+#if defined __i386__ && __ELF_WORD_SIZE == 64
+#error 32-bit application on 64-bit OS is not supported.
+#endif
 #else
 #error unsupported OS
 #endif
 
-#if ELF_CLASS == ELFCLASS64
+#if defined __x86_64__ || defined __x86_64
+#define ELF_DATA      ELFDATA2LSB
+#define E_MACHINE     EM_X86_64
+#ifdef R_X86_64_JUMP_SLOT
+#define R_JUMP_SLOT   R_X86_64_JUMP_SLOT
+#else
+#define R_JUMP_SLOT   R_X86_64_JMP_SLOT
+#endif
+#define SHT_PLT_REL   SHT_RELA
+#define Elf_Plt_Rel   Elf_Rela
+#define PLT_SECTION_NAME ".rela.plt"
+#elif defined __i386__ || defined __i386
+#define ELF_DATA      ELFDATA2LSB
+#define E_MACHINE     EM_386
+#define R_JUMP_SLOT   R_386_JMP_SLOT
+#define SHT_PLT_REL   SHT_REL
+#define Elf_Plt_Rel   Elf_Rel
+#define PLT_SECTION_NAME ".rel.plt"
+#else
+#error E_MACHINE is not defined.
+#endif
+
+#if defined __LP64__
+#ifndef ELF_CLASS
+#define ELF_CLASS     ELFCLASS64
+#endif
 #define SIZE_T_FMT "lu"
 #define Elf_Half Elf64_Half
 #define Elf_Addr Elf64_Addr
@@ -79,9 +105,16 @@
 #define Elf_Sym  Elf64_Sym
 #define Elf_Rel  Elf64_Rel
 #define Elf_Rela Elf64_Rela
+#ifndef ELF_R_SYM
 #define ELF_R_SYM ELF64_R_SYM
+#endif
+#ifndef ELF_R_TYPE
 #define ELF_R_TYPE ELF64_R_TYPE
-#else
+#endif
+#else /* __LP64__ */
+#ifndef ELF_CLASS
+#define ELF_CLASS     ELFCLASS32
+#endif
 #define SIZE_T_FMT "u"
 #define Elf_Half Elf32_Half
 #define Elf_Addr Elf32_Addr
@@ -91,9 +124,13 @@
 #define Elf_Sym  Elf32_Sym
 #define Elf_Rel  Elf32_Rel
 #define Elf_Rela Elf32_Rela
+#ifndef ELF_R_SYM
 #define ELF_R_SYM ELF32_R_SYM
+#endif
+#ifndef ELF_R_TYPE
 #define ELF_R_TYPE ELF32_R_TYPE
 #endif
+#endif /* __LP64__ */
 
 struct plthook {
     const char *base;
@@ -111,6 +148,8 @@ struct plthook {
 
 static char errmsg[512];
 
+static int plthook_open_executable(plthook_t **plthook_out);
+static int plthook_open_shared_library(plthook_t **plthook_out, const char *filename);
 static int plthook_open_real(plthook_t **plthook_out, const char *base, const char *filename);
 static int check_elf_header(const Elf_Ehdr *ehdr);
 static int find_section(plthook_t *image, const char *name, const Elf_Shdr **out);
@@ -121,43 +160,9 @@ int plthook_open(plthook_t **plthook_out, const char *filename)
 {
     *plthook_out = NULL;
     if (filename == NULL) {
-        /* Open the main program. */
-        char buf[PATH_MAX + 100];
-        FILE *fp = fopen("/proc/self/maps", "r");
-        unsigned long base;
-        char fname[PATH_MAX];
-
-        if (fp == NULL) {
-            set_errmsg("Could not open /proc/self/maps: %s",
-                       strerror(errno));
-            return PLTHOOK_INTERNAL_ERROR;
-        }
-        if (fgets(buf, sizeof(buf), fp) == NULL) {
-            set_errmsg("Could not read /proc/self/maps: %s",
-                       strerror(errno));
-            return PLTHOOK_INTERNAL_ERROR;
-        }
-        if (sscanf(buf, "%lx-%*x r-xp %*x %*x:%*x %*u %[^\n]", &base, fname) != 2) {
-            set_errmsg("invalid /proc/self/maps format: %s", buf);
-            return PLTHOOK_INTERNAL_ERROR;
-        }
-        return plthook_open_real(plthook_out, (const char*)base, fname);
+        return plthook_open_executable(plthook_out);
     } else {
-        /* Open the dynamic library file specified by `filename.' */
-        void *hndl = dlopen(filename, RTLD_LAZY | RTLD_NOLOAD);
-        struct link_map *lmap = NULL;
-
-        if (hndl == NULL) {
-            set_errmsg("dlopen error: %s", dlerror());
-            return PLTHOOK_FILE_NOT_FOUND;
-        }
-        if (dlinfo(hndl, RTLD_DI_LINKMAP, &lmap) != 0) {
-            set_errmsg("dlinfo error");
-            dlclose(hndl);
-            return PLTHOOK_FILE_NOT_FOUND;
-        }
-        dlclose(hndl);
-        return plthook_open_real(plthook_out, (const char*)lmap->l_addr, lmap->l_name);
+        return plthook_open_shared_library(plthook_out, filename);
     }
 }
 
@@ -171,6 +176,76 @@ int plthook_open_by_address(plthook_t **plthook_out, void *address)
         return PLTHOOK_FILE_NOT_FOUND;
     }
     return plthook_open_real(plthook_out, info.dli_fbase, info.dli_fname);
+}
+
+static int plthook_open_executable(plthook_t **plthook_out)
+{
+#if defined __linux__
+    /* Open the main program. */
+    char buf[128];
+    FILE *fp = fopen("/proc/self/maps", "r");
+    unsigned long base;
+
+    if (fp == NULL) {
+        set_errmsg("Could not open /proc/self/maps: %s",
+                   strerror(errno));
+        return PLTHOOK_INTERNAL_ERROR;
+    }
+    if (fgets(buf, sizeof(buf), fp) == NULL) {
+        set_errmsg("Could not read /proc/self/maps: %s",
+                   strerror(errno));
+        return PLTHOOK_INTERNAL_ERROR;
+    }
+    if (sscanf(buf, "%lx-%*x r-xp %*x %*x:%*x %*u ", &base) != 1) {
+        set_errmsg("invalid /proc/self/maps format: %s", buf);
+        return PLTHOOK_INTERNAL_ERROR;
+    }
+    return plthook_open_real(plthook_out, (const char*)base, "/proc/self/exe");
+#elif defined __sun
+    prmap_t prmap;
+    pid_t pid = getpid();
+    char fname[128];
+    int fd;
+
+    sprintf(fname, "/proc/%d/map", pid);
+    fd = open(fname, O_RDONLY);
+    if (fd == -1) {
+        set_errmsg("Could not open %s: %s", fname,
+                   strerror(errno));
+        return PLTHOOK_INTERNAL_ERROR;
+    }
+    if (read(fd, &prmap, sizeof(prmap)) != sizeof(prmap)) {
+        set_errmsg("Could not read %s: %s", fname,
+                   strerror(errno));
+        close(fd);
+        return PLTHOOK_INTERNAL_ERROR;
+    }
+    close(fd);
+    sprintf(fname, "/proc/%d/object/a.out", pid);
+    return plthook_open_real(plthook_out, (const char*)prmap.pr_vaddr, fname);
+#elif defined __FreeBSD__
+    return plthook_open_shared_library(plthook_out, NULL);
+#else
+#error unsupported OS
+#endif
+}
+
+static int plthook_open_shared_library(plthook_t **plthook_out, const char *filename)
+{
+    void *hndl = dlopen(filename, RTLD_LAZY | RTLD_NOLOAD);
+    struct link_map *lmap = NULL;
+
+    if (hndl == NULL) {
+        set_errmsg("dlopen error: %s", dlerror());
+        return PLTHOOK_FILE_NOT_FOUND;
+    }
+    if (dlinfo(hndl, RTLD_DI_LINKMAP, &lmap) != 0) {
+        set_errmsg("dlinfo error");
+        dlclose(hndl);
+        return PLTHOOK_FILE_NOT_FOUND;
+    }
+    dlclose(hndl);
+    return plthook_open_real(plthook_out, (const char*)lmap->l_addr, lmap->l_name);
 }
 
 static int plthook_open_real(plthook_t **plthook_out, const char *base, const char *filename)
@@ -204,9 +279,12 @@ static int plthook_open_real(plthook_t **plthook_out, const char *base, const ch
     if (rv != 0) {
         goto error_exit;
     }
+    if (ehdr->e_type == ET_DYN) {
+        plthook->base = base;
+    }
     plthook->phdr = (const Elf_Phdr *)(plthook->base + ehdr->e_phoff);
     plthook->phnum = ehdr->e_phnum;
-    fd = open(filename, O_RDONLY);
+    fd = open(filename, O_RDONLY, 0);
     if (fd == -1) {
         set_errmsg("Could not open %s: %s", filename, strerror(errno));
         rv = PLTHOOK_FILE_NOT_FOUND;
@@ -220,8 +298,8 @@ static int plthook_open_real(plthook_t **plthook_out, const char *base, const ch
         goto error_exit;
     }
     offset = ehdr->e_shoff;
-    if (lseek(fd, offset, SEEK_SET) != offset) {
-        set_errmsg("failed to seek to the section header table.");
+    if ((rv = lseek(fd, offset, SEEK_SET)) != offset) {
+    	set_errmsg("failed to seek to the section header table.");
         rv = PLTHOOK_INVALID_FILE_FORMAT;
         goto error_exit;
     }
