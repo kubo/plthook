@@ -6,7 +6,7 @@
  *
  * ------------------------------------------------------
  *
- * Copyright 2013 Kubo Takehiro <kubo@jiubao.org>
+ * Copyright 2013-2014 Kubo Takehiro <kubo@jiubao.org>
  *
  * Redistribution and use in source and binary forms, with or without modification, are
  * permitted provided that the following conditions are met:
@@ -144,6 +144,8 @@ struct plthook {
     size_t dynsym_cnt;
     const char *dynstr;
     size_t dynstr_size;
+    const Elf_Plt_Rel *plt;
+    size_t plt_cnt;
 };
 
 static char errmsg[512];
@@ -153,7 +155,6 @@ static int plthook_open_shared_library(plthook_t **plthook_out, const char *file
 static int plthook_open_real(plthook_t **plthook_out, const char *base, const char *filename);
 static int check_elf_header(const Elf_Ehdr *ehdr);
 static int find_section(plthook_t *image, const char *name, const Elf_Shdr **out);
-static int find_plt(plthook_t *image, const char *name, Elf_Plt_Rel **out);
 static void set_errmsg(const char *fmt, ...) __attribute__((__format__ (__printf__, 1, 2)));
 
 int plthook_open(plthook_t **plthook_out, const char *filename)
@@ -194,8 +195,10 @@ static int plthook_open_executable(plthook_t **plthook_out)
     if (fgets(buf, sizeof(buf), fp) == NULL) {
         set_errmsg("Could not read /proc/self/maps: %s",
                    strerror(errno));
+        fclose(fp);
         return PLTHOOK_INTERNAL_ERROR;
     }
+    fclose(fp);
     if (sscanf(buf, "%lx-%*x r-xp %*x %*x:%*x %*u ", &base) != 1) {
         set_errmsg("invalid /proc/self/maps format: %s", buf);
         return PLTHOOK_INTERNAL_ERROR;
@@ -299,7 +302,7 @@ static int plthook_open_real(plthook_t **plthook_out, const char *base, const ch
     }
     offset = ehdr->e_shoff;
     if ((rv = lseek(fd, offset, SEEK_SET)) != offset) {
-    	set_errmsg("failed to seek to the section header table.");
+        set_errmsg("failed to seek to the section header table.");
         rv = PLTHOOK_INVALID_FILE_FORMAT;
         goto error_exit;
     }
@@ -360,6 +363,18 @@ static int plthook_open_real(plthook_t **plthook_out, const char *base, const ch
     plthook->dynstr = (const char*)(plthook->base + shdr->sh_addr);
     plthook->dynstr_size = shdr->sh_size;
 
+    rv = find_section(plthook, PLT_SECTION_NAME, &shdr);
+    if (rv != 0) {
+        goto error_exit;
+    }
+    if (shdr->sh_entsize != sizeof(Elf_Plt_Rel)) {
+        set_errmsg("invalid " PLT_SECTION_NAME " table entry size: %" SIZE_T_FMT, shdr->sh_entsize);
+        rv = PLTHOOK_INVALID_FILE_FORMAT;
+        goto error_exit;
+    }
+    plthook->plt = (Elf_Plt_Rel *)(plthook->base + shdr->sh_addr);
+    plthook->plt_cnt = shdr->sh_size / sizeof(Elf_Plt_Rel);
+
     *plthook_out = plthook;
     return 0;
  error_exit:
@@ -370,24 +385,62 @@ static int plthook_open_real(plthook_t **plthook_out, const char *base, const ch
     return rv;
 }
 
+int plthook_enum(plthook_t *plthook, unsigned int *pos, const char **name_out, void ***addr_out)
+{
+    while (*pos < plthook->plt_cnt) {
+        const Elf_Plt_Rel *plt = plthook->plt + *pos;
+        if (ELF_R_TYPE(plt->r_info) == R_JUMP_SLOT) {
+            size_t idx = ELF_R_SYM(plt->r_info);
+
+            if (idx >= plthook->dynsym_cnt) {
+                set_errmsg(".dynsym index %" SIZE_T_FMT " should be less than %" SIZE_T_FMT ".", idx, plthook->dynsym_cnt);
+                return PLTHOOK_INVALID_FILE_FORMAT;
+            }
+            idx = plthook->dynsym[idx].st_name;
+            if (idx + 1 > plthook->dynstr_size) {
+                set_errmsg("too big section header string table index: %" SIZE_T_FMT, idx);
+                return PLTHOOK_INVALID_FILE_FORMAT;
+            }
+            *name_out = plthook->dynstr + idx;
+            *addr_out = (void**)(plthook->base + plt->r_offset);
+            (*pos)++;
+            return 0;
+        }
+        (*pos)++;
+    }
+    *name_out = NULL;
+    *addr_out = NULL;
+    return EOF;
+}
+
 int plthook_replace(plthook_t *plthook, const char *funcname, void *funcaddr, void **oldfunc)
 {
-    Elf_Plt_Rel *plt;
+    size_t funcnamelen = strlen(funcname);
+    unsigned int pos = 0;
+    const char *name;
+    void **addr;
     int rv;
 
     if (plthook == NULL) {
         set_errmsg("invalid argument: The first argument is null.");
         return PLTHOOK_INVALID_ARGUMENT;
     }
-    rv = find_plt(plthook, funcname, &plt);
-    if (rv != 0) {
-        return rv;
+    while ((rv = plthook_enum(plthook, &pos, &name, &addr)) == 0) {
+        if (strncmp(name, funcname, funcnamelen) == 0) {
+            if (name[funcnamelen] == '\0' || name[funcnamelen] == '@') {
+                if (oldfunc) {
+                    *oldfunc = *addr;
+                }
+                *addr = funcaddr;
+                return 0;
+            }
+        }
     }
-    if (oldfunc) {
-        *oldfunc = *(void**)(plthook->base + plt->r_offset);
+    if (rv == EOF) {
+        set_errmsg("no such function: %s", funcname);
+        rv = PLTHOOK_FUNCTION_NOT_FOUND;
     }
-    *(void **)(plthook->base + plt->r_offset) = funcaddr;
-    return 0;
+    return rv;
 }
 
 void plthook_close(plthook_t *plthook)
@@ -473,51 +526,6 @@ static int find_section(plthook_t *image, const char *name, const Elf_Shdr **out
     }
     set_errmsg("failed to find the section header: %s", name);
     return PLTHOOK_INVALID_FILE_FORMAT;
-}
-
-static int find_plt(plthook_t *image, const char *name, Elf_Plt_Rel **out)
-{
-    const Elf_Shdr *shdr;
-    size_t namelen = strlen(name);
-    Elf_Plt_Rel *plt, *plt_end;
-    int rv;
-
-    rv = find_section(image, PLT_SECTION_NAME, &shdr);
-    if (rv != 0) {
-        return rv;
-    }
-    if (shdr->sh_entsize != sizeof(Elf_Plt_Rel)) {
-        set_errmsg("invalid " PLT_SECTION_NAME " table entry size: %" SIZE_T_FMT, shdr->sh_entsize);
-        return PLTHOOK_INVALID_FILE_FORMAT;
-    }
-    plt = (Elf_Plt_Rel *)(image->base + shdr->sh_addr);
-    plt_end = (Elf_Plt_Rel *)(image->base + shdr->sh_addr + shdr->sh_size);
-    while (plt < plt_end) {
-        if (ELF_R_TYPE(plt->r_info) == R_JUMP_SLOT) {
-            size_t idx = ELF_R_SYM(plt->r_info);
-            const char *symname;
-
-            if (idx >= image->dynsym_cnt) {
-                set_errmsg(".dynsym index %" SIZE_T_FMT " should be less than %" SIZE_T_FMT ".", idx, image->dynsym_cnt);
-                return PLTHOOK_INVALID_FILE_FORMAT;
-            }
-            idx = image->dynsym[idx].st_name;
-            if (idx + namelen + 1 > image->dynstr_size) {
-                set_errmsg("too big section header string table index: %" SIZE_T_FMT, idx);
-                return PLTHOOK_INVALID_FILE_FORMAT;
-            }
-            symname = image->dynstr + idx;
-            if (strncmp(symname, name, namelen) == 0) {
-                if (symname[namelen] == '\0' || symname[namelen] == '@') {
-                    *out = plt;
-                    return 0;
-                }
-            }
-        }
-        plt++;
-    }
-    set_errmsg("no such function: %s", name);
-    return PLTHOOK_FUNCTION_NOT_FOUND;
 }
 
 static void set_errmsg(const char *fmt, ...)
