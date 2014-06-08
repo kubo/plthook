@@ -6,7 +6,7 @@
  *
  * ------------------------------------------------------
  *
- * Copyright 2013 Kubo Takehiro <kubo@jiubao.org>
+ * Copyright 2013-2014 Kubo Takehiro <kubo@jiubao.org>
  *
  * Redistribution and use in source and binary forms, with or without modification, are
  * permitted provided that the following conditions are met:
@@ -34,12 +34,13 @@
  *
  */
 #include <stdio.h>
+#include <stddef.h>
 #include <stdarg.h>
 #include <windows.h>
-#include <imagehlp.h>
+#include <dbghelp.h>
 #include "plthook.h"
 
-#define DUMP_ENTRIES 0
+#pragma comment(lib, "dbghelp.lib")
 
 #ifndef _Printf_format_string_
 #define _Printf_format_string_
@@ -48,7 +49,26 @@
 #define __attribute__(arg)
 #endif
 
+#ifdef _WIN64
+#define SIZE_T_FMT "I64u"
+#else
+#define SIZE_T_FMT "u"
+#endif
+
+typedef struct {
+    const char *mod_name;
+    const char *name;
+    void **addr;
+} import_address_entry_t;
+
+struct plthook {
+    HMODULE hMod;
+    unsigned int num_entries;
+    import_address_entry_t entries[1];
+};
+
 static char errbuf[512];
+static int plthook_open_real(plthook_t **plthook_out, HMODULE hMod);
 static void set_errmsg(_Printf_format_string_ const char *fmt, ...) __attribute__((__format__ (__printf__, 1, 2)));
 static void set_errmsg2(_Printf_format_string_ const char *fmt, ...) __attribute__((__format__ (__printf__, 1, 2)));
 static const char *winsock2_ordinal2name(int ordinal);
@@ -62,8 +82,7 @@ int plthook_open(plthook_t **plthook_out, const char *filename)
         set_errmsg2("Cannot get module %s: ", filename);
         return PLTHOOK_FILE_NOT_FOUND;
     }
-    *plthook_out = (plthook_t*)hMod;
-    return 0;
+    return plthook_open_real(plthook_out, hMod);
 }
 
 int plthook_open_by_address(plthook_t **plthook_out, void *address)
@@ -75,7 +94,101 @@ int plthook_open_by_address(plthook_t **plthook_out, void *address)
         set_errmsg2("Cannot get module at address %p: ", address);
         return PLTHOOK_FILE_NOT_FOUND;
     }
-    *plthook_out = (plthook_t*)hMod;
+    return plthook_open_real(plthook_out, hMod);
+}
+
+static int plthook_open_real(plthook_t **plthook_out, HMODULE hMod)
+{
+    plthook_t *plthook;
+    ULONG ulSize;
+    IMAGE_IMPORT_DESCRIPTOR *desc_head, *desc;
+    size_t num_entries = 0;
+    size_t ordinal_name_buflen = 0;
+    size_t idx;
+    char *ordinal_name_buf;
+
+    desc_head = (IMAGE_IMPORT_DESCRIPTOR*)ImageDirectoryEntryToData(hMod, TRUE, IMAGE_DIRECTORY_ENTRY_IMPORT, &ulSize);
+    if (desc_head == NULL) {
+        set_errmsg2("ImageDirectoryEntryToData error: ");
+        return PLTHOOK_INTERNAL_ERROR;
+    }
+
+    /* Calculate size to allocate memory.  */
+    for (desc = desc_head; desc->Name != 0; desc++) {
+        IMAGE_THUNK_DATA *name_thunk = (IMAGE_THUNK_DATA*)((char*)hMod + desc->OriginalFirstThunk);
+        IMAGE_THUNK_DATA *addr_thunk = (IMAGE_THUNK_DATA*)((char*)hMod + desc->FirstThunk);
+        int is_winsock2_dll = (stricmp((char *)hMod + desc->Name, "WS2_32.DLL") == 0);
+
+        while (addr_thunk->u1.Function != 0) {
+            if (IMAGE_SNAP_BY_ORDINAL(name_thunk->u1.Ordinal)) {
+                int ordinal = IMAGE_ORDINAL(name_thunk->u1.Ordinal);
+                const char *name = NULL;
+                if (is_winsock2_dll) {
+                    name = winsock2_ordinal2name(ordinal);
+                }
+                if (name == NULL) {
+                    char buf[64];
+                    ordinal_name_buflen += sprintf(buf, "#%d", ordinal) + 1;
+                }
+            }
+            num_entries++;
+            name_thunk++;
+            addr_thunk++;
+        }
+    }
+
+    plthook = calloc(1, offsetof(plthook_t, entries) + sizeof(import_address_entry_t) * num_entries + ordinal_name_buflen);
+    if (plthook == NULL) {
+        set_errmsg("failed to allocate memory: %" SIZE_T_FMT " bytes", sizeof(plthook_t));
+        return PLTHOOK_OUT_OF_MEMORY;
+    }
+    plthook->hMod = hMod;
+    plthook->num_entries = num_entries;
+
+    ordinal_name_buf = (char*)plthook + offsetof(plthook_t, entries) + sizeof(import_address_entry_t) * num_entries;
+    idx = 0;
+    for (desc = desc_head; desc->Name != 0; desc++) {
+        IMAGE_THUNK_DATA *name_thunk = (IMAGE_THUNK_DATA*)((char*)hMod + desc->OriginalFirstThunk);
+        IMAGE_THUNK_DATA *addr_thunk = (IMAGE_THUNK_DATA*)((char*)hMod + desc->FirstThunk);
+        int is_winsock2_dll = (stricmp((char *)hMod + desc->Name, "WS2_32.DLL") == 0);
+
+        while (addr_thunk->u1.Function != 0) {
+            const char *name = NULL;
+
+            if (IMAGE_SNAP_BY_ORDINAL(name_thunk->u1.Ordinal)) {
+                int ordinal = IMAGE_ORDINAL(name_thunk->u1.Ordinal);
+                if (is_winsock2_dll) {
+                    name = winsock2_ordinal2name(ordinal);
+                }
+                if (name == NULL) {
+                    ordinal_name_buf += sprintf(ordinal_name_buf, "#%d", ordinal) + 1;
+                }
+            } else {
+                name = (char*)((PIMAGE_IMPORT_BY_NAME)((char*)hMod + name_thunk->u1.AddressOfData))->Name;
+            }
+            plthook->entries[idx].mod_name = (char *)hMod + desc->Name;
+            plthook->entries[idx].name = name;
+            plthook->entries[idx].addr = (void**)&addr_thunk->u1.Function;
+            idx++;
+            name_thunk++;
+            addr_thunk++;
+        }
+    }
+
+    *plthook_out = plthook;
+    return 0;
+}
+
+int plthook_enum(plthook_t *plthook, unsigned int *pos, const char **name_out, void ***addr_out)
+{
+    if (*pos >= plthook->num_entries) {
+        *name_out = NULL;
+        *addr_out = NULL;
+        return EOF;
+    }
+    *name_out = plthook->entries[*pos].name;
+    *addr_out = plthook->entries[*pos].addr;
+    (*pos)++;
     return 0;
 }
 
@@ -94,72 +207,45 @@ static void replace_funcaddr(void **addr, void *newfunc, void **oldfunc)
 
 int plthook_replace(plthook_t *plthook, const char *funcname, void *funcaddr, void **oldfunc)
 {
-    HMODULE hMod = (HMODULE)plthook;
-    ULONG ulSize;
-    IMAGE_IMPORT_DESCRIPTOR *desc;
-    int target_ordinal = 0;
+    size_t funcnamelen = strlen(funcname);
+    unsigned int pos = 0;
+    const char *name;
+    void **addr;
+    int rv;
 
     if (plthook == NULL) {
-        set_errmsg("Invalid argument: The first argument is null.");
+        set_errmsg("invalid argument: The first argument is null.");
         return PLTHOOK_INVALID_ARGUMENT;
     }
-
-    if (funcname[0] == '@') {
-        target_ordinal = atoi(funcname + 1);
-    }
-
-    desc = (IMAGE_IMPORT_DESCRIPTOR*)ImageDirectoryEntryToData(hMod, TRUE, IMAGE_DIRECTORY_ENTRY_IMPORT, &ulSize);
-
-    if (desc == NULL) {
-        set_errmsg2("ImageDirectoryEntryToData error: ");
-        return PLTHOOK_INTERNAL_ERROR;
-    }
-    while (desc->Name != 0) {
-        IMAGE_THUNK_DATA *name_thunk = (IMAGE_THUNK_DATA*)((char*)hMod + desc->OriginalFirstThunk);
-        IMAGE_THUNK_DATA *addr_thunk = (IMAGE_THUNK_DATA*)((char*)hMod + desc->FirstThunk);
-        int is_winsock2_dll = (stricmp((char *)hMod + desc->Name, "WS2_32.DLL") == 0);
-#if DUMP_ENTRIES
-        fprintf(stderr, "DLL: %s\n", (char *)hMod + desc->Name);
-#endif
-        while (addr_thunk->u1.Function != 0) {
-            const char *name = NULL;
-            int ordinal = -1;
-
-            if (!IMAGE_SNAP_BY_ORDINAL(name_thunk->u1.Ordinal)) {
-                name = (char*)((PIMAGE_IMPORT_BY_NAME)((char*)hMod + name_thunk->u1.AddressOfData))->Name;
-            } else {
-                ordinal = IMAGE_ORDINAL(name_thunk->u1.Ordinal);
-                if (is_winsock2_dll) {
-                    name = winsock2_ordinal2name(ordinal);
-                }
-            }
-#if DUMP_ENTRIES
-            if (name != NULL) {
-                if (ordinal == -1) {
-                    fprintf(stderr, "   %p %s\n", (void*)addr_thunk->u1.Function, name);
-                } else {
-                    fprintf(stderr, "   %p %s (@%d)\n", (void*)addr_thunk->u1.Function, name, ordinal);
-                }
-            } else {
-                fprintf(stderr, "   %p @%d\n", (void*)addr_thunk->u1.Function, ordinal);
-            }
-#endif
-            if (ordinal == target_ordinal || (name != NULL && strcmp(name, funcname) == 0)) {
-                replace_funcaddr((void**)&addr_thunk->u1.Function, funcaddr, oldfunc);
+    while ((rv = plthook_enum(plthook, &pos, &name, &addr)) == 0) {
+        if (strncmp(name, funcname, funcnamelen) == 0) {
+            if (name[funcnamelen] == '\0' || name[funcnamelen] == '@') {
+                replace_funcaddr(addr, funcaddr, oldfunc);
                 return 0;
             }
-            name_thunk++;
-            addr_thunk++;
         }
-        desc++;
+#ifndef _WIN64
+        if (name[0] == '_' || name[0] == '@') {
+            if (strncmp(name + 1, funcname, funcnamelen) == 0 && name[funcnamelen + 1] == '@') {
+                /* stdcall or fastcall */
+                replace_funcaddr(addr, funcaddr, oldfunc);
+                return 0;
+            }
+        }
+#endif
     }
-    set_errmsg("No such function is imported: %s", funcname);
-    return PLTHOOK_FUNCTION_NOT_FOUND;
+    if (rv == EOF) {
+        set_errmsg("no such function: %s", funcname);
+        rv = PLTHOOK_FUNCTION_NOT_FOUND;
+    }
+    return rv;
 }
 
 void plthook_close(plthook_t *plthook)
 {
-    FreeLibrary((HMODULE)plthook);
+    if (plthook != NULL) {
+        free(plthook);
+    }
 }
 
 const char *plthook_error(void)
