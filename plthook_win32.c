@@ -40,7 +40,9 @@
 #include <dbghelp.h>
 #include "plthook.h"
 
+#ifdef _MSC_VER
 #pragma comment(lib, "dbghelp.lib")
+#endif
 
 #ifndef _Printf_format_string_
 #define _Printf_format_string_
@@ -207,7 +209,9 @@ static void replace_funcaddr(void **addr, void *newfunc, void **oldfunc)
 
 int plthook_replace(plthook_t *plthook, const char *funcname, void *funcaddr, void **oldfunc)
 {
+#ifndef _WIN64
     size_t funcnamelen = strlen(funcname);
+#endif
     unsigned int pos = 0;
     const char *name;
     void **addr;
@@ -218,18 +222,26 @@ int plthook_replace(plthook_t *plthook, const char *funcname, void *funcaddr, vo
         return PLTHOOK_INVALID_ARGUMENT;
     }
     while ((rv = plthook_enum(plthook, &pos, &name, &addr)) == 0) {
+#ifdef _WIN64
+        if (strcmp(name, funcname) == 0) {
+            replace_funcaddr(addr, funcaddr, oldfunc);
+            return 0;
+        }
+#else
+        /* Function names may be decorated in Windows 32-bit applications. */
         if (strncmp(name, funcname, funcnamelen) == 0) {
             if (name[funcnamelen] == '\0' || name[funcnamelen] == '@') {
                 replace_funcaddr(addr, funcaddr, oldfunc);
                 return 0;
             }
         }
-#ifndef _WIN64
         if (name[0] == '_' || name[0] == '@') {
-            if (strncmp(name + 1, funcname, funcnamelen) == 0 && name[funcnamelen + 1] == '@') {
-                /* stdcall or fastcall */
-                replace_funcaddr(addr, funcaddr, oldfunc);
-                return 0;
+            name++;
+            if (strncmp(name, funcname, funcnamelen) == 0) {
+                if (name[funcnamelen] == '\0' || name[funcnamelen] == '@') {
+                    replace_funcaddr(addr, funcaddr, oldfunc);
+                    return 0;
+                }
             }
         }
 #endif
