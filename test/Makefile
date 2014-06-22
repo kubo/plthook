@@ -7,12 +7,12 @@ LIBS = -ldl
 PLTHOOK_C = plthook.c
 
 # Mingw32
-CC = gcc
-CC_SHARED = gcc -shared
-EXEEXT = .exe
-SOEXT = dll
-LIBS = -ldbghelp
-PLTHOOK_C = plthook_win32.c
+#CC = gcc
+#CC_SHARED = gcc -shared
+#EXEEXT = .exe
+#SOEXT = dll
+#LIBS = -ldbghelp
+#PLTHOOK_C = plthook_win32.c
 
 all: libtest.$(SOEXT) testprog$(EXEEXT)
 
