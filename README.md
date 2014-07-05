@@ -46,10 +46,11 @@ in your source tree and add the following code.
 Supported Platforms
 -------------------
 
-* Linux i386 and x86_64
-* Windows 32-bit and x64
-* Solaris x86_64
-* FreeBSD i386 and x86_64 except i386 program on x86_64 OS
+* Linux i386 and x86_64 by plthook_elf.c
+* Windows 32-bit and x64 (MSVC, Mingw32 and Cygwin) by plthook_win32.c
+* OS X (tested on Mavericks) by plthook_osx.c
+* Solaris x86_64 by plthook_elf.c
+* FreeBSD i386 and x86_64 except i386 program on x86_64 OS by plthook_elf.c
 
 License
 -------
