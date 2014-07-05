@@ -6,7 +6,7 @@ double ceil_cdecl(double x)
     return ceil(x);
 }
 
-#ifdef _WIN32
+#if defined _WIN32 || defined __CYGWIN__
 double __stdcall ceil_stdcall(double x)
 {
     return ceil(x);

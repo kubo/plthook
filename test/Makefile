@@ -14,6 +14,16 @@ ifeq ($(findstring MINGW32_NT,$(UNAME_S)),MINGW32_NT)
   PLTHOOK_C = plthook_win32.c
 endif
 
+ifeq ($(findstring CYGWIN_NT,$(UNAME_S)),CYGWIN_NT)
+  # Cygwin
+  CC = gcc
+  CC_SHARED = gcc -shared
+  EXEEXT = .exe
+  SOEXT = dll
+  LIBS = -ldbghelp
+  PLTHOOK_C = plthook_win32.c
+endif
+
 ifeq ($(UNAME_S),Darwin)
   # OS X
   CC = gcc

@@ -21,15 +21,15 @@ static enum_test_data_t funcs_called_by_libtest[] = {
 };
 
 static enum_test_data_t funcs_called_by_main[] = {
-#if defined _WIN64
+#if defined _WIN64 || (defined __CYGWIN__ && defined __x86_64__)
     {"ceil_cdecl", 0},
     {"ceil_stdcall", 0},
     {"ceil_fastcall", 0},
-#elif defined _WIN32 && defined __MINGW32__
+#elif defined _WIN32 && defined __GNUC__
     {"ceil_cdecl", 0},
     {"ceil_stdcall@8", 0},
     {"@ceil_fastcall@8", 0},
-#elif defined _WIN32 && !defined __MINGW32__
+#elif defined _WIN32 && !defined __GNUC__
     {"ceil_cdecl", 0},
     {"_ceil_stdcall@8", 0},
     {"@ceil_fastcall@8", 0},
@@ -45,7 +45,7 @@ static double ceil_arg = 0.0;
 static double ceil_result = 0.0;
 static double ceil_cdecl_arg = 0.0;
 static double ceil_cdecl_result = 0.0;
-#ifdef _WIN32
+#if defined _WIN32 || defined __CYGWIN__
 static double ceil_stdcall_arg = 0.0;
 static double ceil_stdcall_result = 0.0;
 static double ceil_fastcall_arg = 0.0;
@@ -53,7 +53,7 @@ static double ceil_fastcall_result = 0.0;
 #endif
 
 static double (*ceil_cdecl_old_func)(double);
-#ifdef _WIN32
+#if defined _WIN32 || defined __CYGWIN__
 static double (__stdcall *ceil_stdcall_old_func)(double);
 static double (__fastcall *ceil_fastcall_old_func)(double);
 #endif
@@ -74,7 +74,7 @@ static double ceil_cdecl_hook_func(double arg)
     return result;
 }
 
-#ifdef _WIN32
+#if defined _WIN32 || defined __CYGWIN__
 static double __stdcall ceil_stdcall_hook_func(double arg)
 {
     double result = ceil_stdcall_old_func(arg);
@@ -128,7 +128,7 @@ int main(int argc, char **argv)
      */
     arg = 1.3;
     ceil_cdecl(arg);
-#ifdef _WIN32
+#if defined _WIN32 || defined __CYGWIN__
     ceil_stdcall(arg);
     ceil_fastcall(arg);
 #endif
@@ -137,7 +137,7 @@ int main(int argc, char **argv)
     assert(ceil_result == 0.0);
     assert(ceil_cdecl_arg == 0.0);
     assert(ceil_cdecl_result == 0.0);
-#ifdef _WIN32
+#if defined _WIN32 || defined __CYGWIN__
     assert(ceil_stdcall_arg == 0.0);
     assert(ceil_stdcall_result == 0.0);
     assert(ceil_fastcall_arg == 0.0);
@@ -147,13 +147,13 @@ int main(int argc, char **argv)
     assert(plthook_open(&plthook, NULL) == 0);
     test_plthook_enum(plthook, funcs_called_by_main);
     assert(plthook_replace(plthook, "ceil_cdecl", ceil_cdecl_hook_func, (void**)&ceil_cdecl_old_func) == 0);
-#ifdef _WIN32
+#if defined _WIN32 || defined __CYGWIN__
     assert(plthook_replace(plthook, "ceil_stdcall", ceil_stdcall_hook_func, (void**)&ceil_stdcall_old_func) == 0);
     assert(plthook_replace(plthook, "ceil_fastcall", ceil_fastcall_hook_func, (void**)&ceil_fastcall_old_func) == 0);
 #endif
     plthook_close(plthook);
 
-#ifdef _WIN32
+#if defined _WIN32 || defined __CYGWIN__
     assert(plthook_open(&plthook, "libtest.dll") == 0);
 #else
     assert(plthook_open(&plthook, "libtest.so") == 0);
@@ -170,7 +170,7 @@ int main(int argc, char **argv)
     assert(ceil_result == result);
     assert(ceil_arg == arg);
 
-#ifdef _WIN32
+#if defined _WIN32 || defined __CYGWIN__
     arg = 5.3;
     result = ceil_stdcall(arg);
     assert(result != 0.0);

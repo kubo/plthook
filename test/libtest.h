@@ -14,7 +14,7 @@
 LIBTESTAPI
 double ceil_cdecl(double x);
 
-#ifdef _WIN32
+#if defined _WIN32 || defined __CYGWIN__
 LIBTESTAPI
 double __stdcall ceil_stdcall(double x);
 
