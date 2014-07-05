@@ -1,18 +1,38 @@
-# Linux
-CC = gcc
-CC_SHARED = gcc -shared -fPIC
-EXEEXT =
-SOEXT = so
-LIBS = -ldl
-PLTHOOK_C = plthook.c
+#
+# This Makefile works only with GNU make.
+#
 
-# Mingw32
-#CC = gcc
-#CC_SHARED = gcc -shared
-#EXEEXT = .exe
-#SOEXT = dll
-#LIBS = -ldbghelp
-#PLTHOOK_C = plthook_win32.c
+UNAME_S := $(shell uname -s)
+
+ifeq ($(findstring MINGW32_NT,$(UNAME_S)),MINGW32_NT)
+  # Mingw32
+  CC = gcc
+  CC_SHARED = gcc -shared
+  EXEEXT = .exe
+  SOEXT = dll
+  LIBS = -ldbghelp
+  PLTHOOK_C = plthook_win32.c
+endif
+
+ifeq ($(UNAME_S),Darwin)
+  # OS X
+  CC = gcc
+  CC_SHARED = gcc -shared -fPIC -Wno-deprecated-declarations
+  EXEEXT =
+  SOEXT = so
+  LIBS = -ldl
+  PLTHOOK_C = plthook_osx.c
+endif
+
+ifndef PLTHOOK_C
+  # Linux
+  CC = gcc
+  CC_SHARED = gcc -shared -fPIC
+  EXEEXT =
+  SOEXT = so
+  LIBS = -ldl
+  PLTHOOK_C = plthook.c
+endif
 
 all: libtest.$(SOEXT) testprog$(EXEEXT)
 

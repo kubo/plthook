@@ -2,6 +2,7 @@
 #include <math.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 #include <assert.h>
 #include "libtest.h"
 
@@ -11,25 +12,32 @@ typedef struct {
 } enum_test_data_t;
 
 static enum_test_data_t funcs_called_by_libtest[] = {
+#if defined __APPLE__
+    {"_ceil", 0},
+#else
     {"ceil", 0},
+#endif
     {NULL, },
 };
 
 static enum_test_data_t funcs_called_by_main[] = {
+#if defined _WIN64
     {"ceil_cdecl", 0},
-#ifdef _WIN32
-#ifdef _WIN64
     {"ceil_stdcall", 0},
     {"ceil_fastcall", 0},
-#else
-#ifdef __MINGW32__
+#elif defined _WIN32 && defined __MINGW32__
+    {"ceil_cdecl", 0},
     {"ceil_stdcall@8", 0},
-#else
-    {"_ceil_stdcall@8", 0},
-#endif /* __MINGW32__ */
     {"@ceil_fastcall@8", 0},
-#endif /* _WIN64 */
-#endif /* _WIN32 */
+#elif defined _WIN32 && !defined __MINGW32__
+    {"ceil_cdecl", 0},
+    {"_ceil_stdcall@8", 0},
+    {"@ceil_fastcall@8", 0},
+#elif defined __APPLE__
+    {"_ceil_cdecl", 0},
+#else
+    {"ceil_cdecl", 0},
+#endif
     {NULL, },
 };
 
