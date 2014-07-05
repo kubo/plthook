@@ -41,7 +41,7 @@ ifndef PLTHOOK_C
   EXEEXT =
   SOEXT = so
   LIBS = -ldl
-  PLTHOOK_C = plthook.c
+  PLTHOOK_C = plthook_elf.c
 endif
 
 all: libtest.$(SOEXT) testprog$(EXEEXT)
