@@ -51,10 +51,16 @@
 #define __attribute__(arg)
 #endif
 
-#ifdef _WIN64
+#if defined _MSC_VER && defined _WIN64
 #define SIZE_T_FMT "I64u"
+#elif defined __CYGWIN__ && defined _LP64
+#define SIZE_T_FMT "lu"
 #else
 #define SIZE_T_FMT "u"
+#endif
+
+#ifdef __CYGWIN__
+#define stricmp strcasecmp
 #endif
 
 typedef struct {
