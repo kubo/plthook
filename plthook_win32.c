@@ -51,10 +51,10 @@
 #define __attribute__(arg)
 #endif
 
-#if defined _MSC_VER && defined _WIN64
-#define SIZE_T_FMT "I64u"
-#elif defined __CYGWIN__ && defined _LP64
+#if defined _LP64 /* data model: I32/LP64 */
 #define SIZE_T_FMT "lu"
+#elif defined _WIN64  /* data model: IL32/P64 */
+#define SIZE_T_FMT "I64u"
 #else
 #define SIZE_T_FMT "u"
 #endif
