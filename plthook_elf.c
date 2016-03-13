@@ -6,7 +6,7 @@
  *
  * ------------------------------------------------------
  *
- * Copyright 2013-2014 Kubo Takehiro <kubo@jiubao.org>
+ * Copyright 2013-2016 Kubo Takehiro <kubo@jiubao.org>
  *
  * Redistribution and use in source and binary forms, with or without modification, are
  * permitted provided that the following conditions are met:
@@ -42,6 +42,7 @@
 #include <limits.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/mman.h>
 #include <fcntl.h>
 #include <errno.h>
 #include <dlfcn.h>
@@ -146,9 +147,17 @@ struct plthook {
     size_t dynstr_size;
     const Elf_Plt_Rel *plt;
     size_t plt_cnt;
+#ifdef PT_GNU_RELRO
+    const char *relro_start;
+    const char *relro_end;
+#endif
 };
 
 static char errmsg[512];
+
+#ifdef PT_GNU_RELRO
+static size_t page_size;
+#endif
 
 static int plthook_open_executable(plthook_t **plthook_out);
 static int plthook_open_shared_library(plthook_t **plthook_out, const char *filename);
@@ -260,6 +269,9 @@ static int plthook_open_real(plthook_t **plthook_out, const char *base, const ch
     off_t offset;
     plthook_t *plthook;
     int rv;
+#ifdef PT_GNU_RELRO
+    size_t idx;
+#endif
 
     if (base == NULL) {
         set_errmsg("The base address is zero.");
@@ -330,6 +342,29 @@ static int plthook_open_real(plthook_t **plthook_out, const char *base, const ch
         rv = PLTHOOK_INVALID_FILE_FORMAT;
         goto error_exit;
     }
+#ifdef PT_GNU_RELRO
+    if (page_size == 0) {
+        page_size = sysconf(_SC_PAGESIZE);
+    }
+    offset = ehdr->e_phoff;
+    if ((rv = lseek(fd, offset, SEEK_SET)) != offset) {
+        set_errmsg("failed to seek to the program header table.");
+        rv = PLTHOOK_INVALID_FILE_FORMAT;
+        goto error_exit;
+    }
+    for (idx = 0; idx < ehdr->e_phnum; idx++) {
+        Elf_Phdr phdr;
+        if (read(fd, &phdr, sizeof(phdr)) != sizeof(phdr)) {
+            set_errmsg("failed to read the program header table.");
+            rv = PLTHOOK_INVALID_FILE_FORMAT;
+            goto error_exit;
+        }
+        if (phdr.p_type == PT_GNU_RELRO) {
+            plthook->relro_start = plthook->base + phdr.p_vaddr;
+            plthook->relro_end = plthook->relro_start + phdr.p_memsz;
+        }
+    }
+#endif
     close(fd);
     fd = -1;
 
@@ -428,10 +463,26 @@ int plthook_replace(plthook_t *plthook, const char *funcname, void *funcaddr, vo
     while ((rv = plthook_enum(plthook, &pos, &name, &addr)) == 0) {
         if (strncmp(name, funcname, funcnamelen) == 0) {
             if (name[funcnamelen] == '\0' || name[funcnamelen] == '@') {
+#ifdef PT_GNU_RELRO
+                void *maddr = NULL;
+                if (plthook->relro_start <= (char*)addr && (char*)addr < plthook->relro_end) {
+                    maddr = (void*)((size_t)addr & ~(page_size - 1));
+                    if (mprotect(maddr, page_size, PROT_READ | PROT_WRITE) != 0) {
+                        set_errmsg("Could not change the process memory protection at %p: %s",
+                                   maddr, strerror(errno));
+                        return PLTHOOK_INTERNAL_ERROR;
+                    }
+                }
+#endif
                 if (oldfunc) {
                     *oldfunc = *addr;
                 }
                 *addr = funcaddr;
+#ifdef PT_GNU_RELRO
+                if (maddr != NULL) {
+                    mprotect(maddr, page_size, PROT_READ);
+                }
+#endif
                 return 0;
             }
         }
