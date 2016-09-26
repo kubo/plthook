@@ -176,6 +176,21 @@ int plthook_open(plthook_t **plthook_out, const char *filename)
     }
 }
 
+int plthook_open_by_handle(plthook_t **plthook_out, void *hndl)
+{
+    struct link_map *lmap = NULL;
+
+    if (hndl == NULL) {
+        set_errmsg("NULL handle");
+        return PLTHOOK_FILE_NOT_FOUND;
+    }
+    if (dlinfo(hndl, RTLD_DI_LINKMAP, &lmap) != 0) {
+        set_errmsg("dlinfo error");
+        return PLTHOOK_FILE_NOT_FOUND;
+    }
+    return plthook_open_real(plthook_out, (const char*)lmap->l_addr, lmap->l_name);
+}
+
 int plthook_open_by_address(plthook_t **plthook_out, void *address)
 {
     Dl_info info;
