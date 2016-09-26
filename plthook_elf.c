@@ -60,6 +60,7 @@
 
 #if defined __linux__
 #define ELF_OSABI     ELFOSABI_SYSV
+#define ELF_OSABI_ALT ELFOSABI_LINUX
 #elif defined __sun
 #define ELF_OSABI     ELFOSABI_SOLARIS
 #elif defined __FreeBSD__
@@ -543,8 +544,15 @@ static int check_elf_header(const Elf_Ehdr *ehdr)
         return PLTHOOK_INVALID_FILE_FORMAT;
     }
     if (ehdr->e_ident[EI_OSABI] != ELF_OSABI) {
+#ifdef ELF_OSABI_ALT
+        if (ehdr->e_ident[EI_OSABI] != ELF_OSABI_ALT) {
+            set_errmsg("invalid OS ABI: 0x%02x", ehdr->e_ident[EI_OSABI]);
+            return PLTHOOK_INVALID_FILE_FORMAT;
+        }
+#else
         set_errmsg("invalid OS ABI: 0x%02x", ehdr->e_ident[EI_OSABI]);
         return PLTHOOK_INVALID_FILE_FORMAT;
+#endif
     }
     if (ehdr->e_type != ET_EXEC && ehdr->e_type != ET_DYN) {
         set_errmsg("invalid file type: 0x%04x", ehdr->e_type);
