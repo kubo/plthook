@@ -60,6 +60,7 @@
 
 #if defined __linux__
 #define ELF_OSABI     ELFOSABI_SYSV
+#define ELF_OSABI_ALT ELFOSABI_LINUX
 #elif defined __sun
 #define ELF_OSABI     ELFOSABI_SOLARIS
 #elif defined __FreeBSD__
@@ -174,6 +175,21 @@ int plthook_open(plthook_t **plthook_out, const char *filename)
     } else {
         return plthook_open_shared_library(plthook_out, filename);
     }
+}
+
+int plthook_open_by_handle(plthook_t **plthook_out, void *hndl)
+{
+    struct link_map *lmap = NULL;
+
+    if (hndl == NULL) {
+        set_errmsg("NULL handle");
+        return PLTHOOK_FILE_NOT_FOUND;
+    }
+    if (dlinfo(hndl, RTLD_DI_LINKMAP, &lmap) != 0) {
+        set_errmsg("dlinfo error");
+        return PLTHOOK_FILE_NOT_FOUND;
+    }
+    return plthook_open_real(plthook_out, (const char*)lmap->l_addr, lmap->l_name);
 }
 
 int plthook_open_by_address(plthook_t **plthook_out, void *address)
@@ -528,8 +544,15 @@ static int check_elf_header(const Elf_Ehdr *ehdr)
         return PLTHOOK_INVALID_FILE_FORMAT;
     }
     if (ehdr->e_ident[EI_OSABI] != ELF_OSABI) {
+#ifdef ELF_OSABI_ALT
+        if (ehdr->e_ident[EI_OSABI] != ELF_OSABI_ALT) {
+            set_errmsg("invalid OS ABI: 0x%02x", ehdr->e_ident[EI_OSABI]);
+            return PLTHOOK_INVALID_FILE_FORMAT;
+        }
+#else
         set_errmsg("invalid OS ABI: 0x%02x", ehdr->e_ident[EI_OSABI]);
         return PLTHOOK_INVALID_FILE_FORMAT;
+#endif
     }
     if (ehdr->e_type != ET_EXEC && ehdr->e_type != ET_DYN) {
         set_errmsg("invalid file type: 0x%04x", ehdr->e_type);

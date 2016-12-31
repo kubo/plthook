@@ -93,6 +93,15 @@ int plthook_open(plthook_t **plthook_out, const char *filename)
     return plthook_open_real(plthook_out, hMod);
 }
 
+int plthook_open_by_handle(plthook_t **plthook_out, void *hndl)
+{
+    if (hndl == NULL) {
+        set_errmsg("NULL handle");
+        return PLTHOOK_FILE_NOT_FOUND;
+    }
+    return plthook_open_real(plthook_out, (HMODULE)hndl);
+}
+
 int plthook_open_by_address(plthook_t **plthook_out, void *address)
 {
     HMODULE hMod;

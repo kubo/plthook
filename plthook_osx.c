@@ -142,6 +142,15 @@ int plthook_open(plthook_t **plthook_out, const char *filename)
     return plthook_open_real(plthook_out, _dyld_get_image_header(idx));
 }
 
+int plthook_open_by_handle(plthook_t **plthook_out, void *hndl)
+{
+    if (hndl == NULL) {
+        set_errmsg("NULL handle");
+        return PLTHOOK_FILE_NOT_FOUND;
+    }
+    return plthook_open_real(plthook_out, (const struct mach_header *)hdnl);
+}
+
 int plthook_open_by_address(plthook_t **plthook_out, void *address)
 {
     Dl_info dlinfo;
