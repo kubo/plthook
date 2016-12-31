@@ -144,11 +144,33 @@ int plthook_open(plthook_t **plthook_out, const char *filename)
 
 int plthook_open_by_handle(plthook_t **plthook_out, void *hndl)
 {
+    int flags[] = {
+        RTLD_LAZY | RTLD_NOLOAD,
+        RTLD_LAZY | RTLD_NOLOAD | RTLD_FIRST,
+    };
+    int flag_idx;
+#define NUM_FLAGS (sizeof(flags) / sizeof(flags[0]))
+
     if (hndl == NULL) {
         set_errmsg("NULL handle");
         return PLTHOOK_FILE_NOT_FOUND;
     }
-    return plthook_open_real(plthook_out, (const struct mach_header *)hdnl);
+    for (flag_idx = 0; flag_idx < NUM_FLAGS; flag_idx++) {
+        const char *image_name = NULL;
+        uint32_t idx = 0;
+
+        do {
+            void *handle = dlopen(image_name, flags[flag_idx]);
+            if (handle != NULL) {
+                dlclose(handle);
+                if (handle == hndl) {
+                    return plthook_open_real(plthook_out, _dyld_get_image_header(idx));
+                }
+            }
+        } while ((image_name = _dyld_get_image_name(++idx)) != NULL);
+    }
+    set_errmsg("Cannot find the image correspond to handle %p", hndl);
+    return PLTHOOK_FILE_NOT_FOUND;
 }
 
 int plthook_open_by_address(plthook_t **plthook_out, void *address)

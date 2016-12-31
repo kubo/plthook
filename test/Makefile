@@ -53,7 +53,8 @@ testprog$(EXEEXT): testprog.c ../$(PLTHOOK_C) libtest.h
 	$(CC) -o testprog$(EXEEXT) -I.. testprog.c ../$(PLTHOOK_C) -L. -ltest $(LIBS)
 
 check: libtest.$(SOEXT) testprog$(EXEEXT)
-	LD_LIBRARY_PATH=. ./testprog$(EXEEXT)
+	LD_LIBRARY_PATH=. ./testprog$(EXEEXT) open
+	LD_LIBRARY_PATH=. ./testprog$(EXEEXT) open_by_handle
 
 clean:
 	$(RM) libtest.$(SOEXT) testprog$(EXEEXT)

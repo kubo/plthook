@@ -9,7 +9,8 @@ testprog.exe: testprog.c ../plthook_win32.c libtest.h
 	cl /nologo /MD /Fetestprog -I.. testprog.c ..\plthook_win32.c libtest.lib
 
 check: libtest.dll testprog.exe
-	.\testprog.exe
+	.\testprog.exe open
+	.\testprog.exe open_by_handle
 
 clean:
 	del libtest.dll libtest.exp libtest.lib libtest.obj plthook_win32.obj testprog.exe testprog.obj

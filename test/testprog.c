@@ -5,11 +5,21 @@
 #include <string.h>
 #include <assert.h>
 #include "libtest.h"
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <dlfcn.h>
+#endif
 
 typedef struct {
     const char *name;
     int enumerated;
 } enum_test_data_t;
+
+enum open_mode {
+    OPEN_MODE_DEFAULT,
+    OPEN_MODE_BY_HANDLE,
+};
 
 static enum_test_data_t funcs_called_by_libtest[] = {
 #if defined __APPLE__
@@ -117,11 +127,35 @@ static void test_plthook_enum(plthook_t *plthook, enum_test_data_t *test_data)
     }
 }
 
+static void show_usage(const char *arg0)
+{
+    fprintf(stderr, "Usage: %s (open | open_by_handle)\n", arg0);
+    exit(1);
+}
+
 int main(int argc, char **argv)
 {
     plthook_t *plthook;
     double arg;
     double result;
+    void *handle;
+    enum open_mode open_mode;
+#if defined _WIN32 || defined __CYGWIN__
+    const char *filename = "libtest.dll";
+#else
+    const char *filename = "libtest.so";
+#endif
+
+    if (argc != 2) {
+        show_usage(argv[0]);
+    }
+    if (strcmp(argv[1], "open") == 0) {
+        open_mode = OPEN_MODE_DEFAULT;
+    } else if (strcmp(argv[1], "open_by_handle") == 0) {
+        open_mode = OPEN_MODE_BY_HANDLE;
+    } else {
+        show_usage(argv[0]);
+    }
 
     /* Call ceil_cdecl(), ceil_stdcall() and ceil_fastcall() before plthook_replace()
      * to resolve the address by lazy binding.
@@ -144,7 +178,20 @@ int main(int argc, char **argv)
     assert(ceil_fastcall_result == 0.0);
 #endif
 
-    assert(plthook_open(&plthook, NULL) == 0);
+    switch (open_mode) {
+    case OPEN_MODE_DEFAULT:
+        assert(plthook_open(&plthook, NULL) == 0);
+        break;
+    case OPEN_MODE_BY_HANDLE:
+#ifdef WIN32
+        handle = GetModuleHandle(NULL);
+#else
+        handle = dlopen(NULL, RTLD_LAZY);
+#endif
+        assert(handle != NULL);
+        assert(plthook_open_by_handle(&plthook, handle) == 0);
+        break;
+    }
     test_plthook_enum(plthook, funcs_called_by_main);
     assert(plthook_replace(plthook, "ceil_cdecl", ceil_cdecl_hook_func, (void**)&ceil_cdecl_old_func) == 0);
 #if defined _WIN32 || defined __CYGWIN__
@@ -153,11 +200,22 @@ int main(int argc, char **argv)
 #endif
     plthook_close(plthook);
 
-#if defined _WIN32 || defined __CYGWIN__
-    assert(plthook_open(&plthook, "libtest.dll") == 0);
+
+    switch (open_mode) {
+    case OPEN_MODE_DEFAULT:
+        assert(plthook_open(&plthook, filename) == 0);
+        break;
+    case OPEN_MODE_BY_HANDLE:
+#ifdef WIN32
+        handle = GetModuleHandle(filename);
 #else
-    assert(plthook_open(&plthook, "libtest.so") == 0);
+        handle = dlopen(filename, RTLD_LAZY | RTLD_NOLOAD);
 #endif
+        assert(handle != NULL);
+        assert(plthook_open_by_handle(&plthook, handle) == 0);
+        break;
+    }
+
     test_plthook_enum(plthook, funcs_called_by_libtest);
     assert(plthook_replace(plthook, "ceil", ceil_hook_func, NULL) == 0);
     plthook_close(plthook);
