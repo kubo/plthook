@@ -40,7 +40,7 @@ ifndef PLTHOOK_C
   CC_SHARED = gcc -shared -fPIC
   EXEEXT =
   SOEXT = so
-  LIBS = -ldl
+  LIBS = -ldl -lm
   PLTHOOK_C = plthook_elf.c
 endif
 
