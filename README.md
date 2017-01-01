@@ -14,7 +14,7 @@ Usage
 
 If you have a library `libfoo.so.1` and want to intercept
 a function call `recv()` without modifying the library,
-put `plthook.c` (or `plthook_win32.c` for Windows) and `plthook.h`
+put `plthook.h` and `plthook_elf.c`, `plthook_win32.c` or `plthook_osx.c`.
 in your source tree and add the following code.
 
 
@@ -48,11 +48,16 @@ in your source tree and add the following code.
 Supported Platforms
 -------------------
 
-* Linux i386 and x86_64 by plthook_elf.c
-* Windows 32-bit and x64 (MSVC, Mingw32 and Cygwin) by plthook_win32.c
-* OS X (tested on Mavericks) by plthook_osx.c
-* Solaris x86_64 by plthook_elf.c
-* FreeBSD i386 and x86_64 except i386 program on x86_64 OS by plthook_elf.c
+| Platform | source file |
+| -------- | ----------- |
+| Linux i386 and x86_64 | plthook_elf.c |
+| Windows 32-bit and x64 (MSVC, Mingw32 and Cygwin) | plthook_win32.c |
+| macOS | plthook_osx.c
+| Solaris x86_64 | plthook_elf.c |
+| FreeBSD i386 and x86_64 except i386 program on x86_64 OS | plthook_elf.c |
+
+Even though your platform isn't in the above table, if the object file format is `ELF`,
+the platform may be supported by `plthook_elf.c` with small modification.
 
 License
 -------
