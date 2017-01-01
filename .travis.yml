@@ -1,0 +1,7 @@
+matrix:
+  include:
+    - os: linux
+    - os: osx
+language: c
+script:
+  - cd test && make && make check
