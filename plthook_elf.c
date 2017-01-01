@@ -189,11 +189,9 @@ int plthook_open_by_handle(plthook_t **plthook_out, void *hndl)
         set_errmsg("dlinfo error");
         return PLTHOOK_FILE_NOT_FOUND;
     }
-#ifdef __linux
     if (lmap->l_addr == 0 && *lmap->l_name == 0) {
         return plthook_open_executable(plthook_out);
     }
-#endif
     return plthook_open_real(plthook_out, (const char*)lmap->l_addr, lmap->l_name);
 }
 
@@ -259,7 +257,8 @@ static int plthook_open_executable(plthook_t **plthook_out)
 #elif defined __FreeBSD__
     return plthook_open_shared_library(plthook_out, NULL);
 #else
-#error unsupported OS
+    set_errmsg("Opening the main program is not supported on this platform.");
+    return PLTHOOK_NOT_IMPLEMENTED;
 #endif
 }
 
