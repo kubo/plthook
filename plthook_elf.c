@@ -33,6 +33,9 @@
  * or implied, of the authors.
  *
  */
+#if defined(__sun) && defined(_XOPEN_SOURCE) && !defined(__EXTENSIONS__)
+#define __EXTENSIONS__
+#endif
 #define _GNU_SOURCE
 #include <stdio.h>
 #include <stdarg.h>
