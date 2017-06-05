@@ -86,6 +86,8 @@
 #define SHT_PLT_REL   SHT_RELA
 #define Elf_Plt_Rel   Elf_Rela
 #define PLT_SECTION_NAME ".rela.plt"
+#define R_GLOBAL_DATA R_X86_64_GLOB_DAT
+#define REL_DYN_SECTION_NAME ".rela.dyn"
 #elif defined __i386__ || defined __i386
 #define ELF_DATA      ELFDATA2LSB
 #define E_MACHINE     EM_386
@@ -93,6 +95,8 @@
 #define SHT_PLT_REL   SHT_REL
 #define Elf_Plt_Rel   Elf_Rel
 #define PLT_SECTION_NAME ".rel.plt"
+#define R_GLOBAL_DATA R_386_GLOB_DAT
+#define REL_DYN_SECTION_NAME ".rel.dyn"
 #else
 #error E_MACHINE is not defined.
 #endif
@@ -103,6 +107,7 @@
 #endif
 #define SIZE_T_FMT "lu"
 #define Elf_Half Elf64_Half
+#define Elf_Xword Elf64_Xword
 #define Elf_Addr Elf64_Addr
 #define Elf_Ehdr Elf64_Ehdr
 #define Elf_Phdr Elf64_Phdr
@@ -122,6 +127,7 @@
 #endif
 #define SIZE_T_FMT "u"
 #define Elf_Half Elf32_Half
+#define Elf_Xword Elf32_Xword
 #define Elf_Addr Elf32_Addr
 #define Elf_Ehdr Elf32_Ehdr
 #define Elf_Phdr Elf32_Phdr
@@ -151,6 +157,7 @@ struct plthook {
     size_t dynstr_size;
     const Elf_Plt_Rel *plt;
     size_t plt_cnt;
+    Elf_Xword r_type;
 #ifdef PT_GNU_RELRO
     const char *relro_start;
     const char *relro_end;
@@ -422,6 +429,13 @@ static int plthook_open_real(plthook_t **plthook_out, const char *base, const ch
     plthook->dynstr_size = shdr->sh_size;
 
     rv = find_section(plthook, PLT_SECTION_NAME, &shdr);
+    plthook->r_type = R_JUMP_SLOT;
+#ifdef REL_DYN_SECTION_NAME
+    if (rv != 0) {
+        rv = find_section(plthook, REL_DYN_SECTION_NAME, &shdr);
+        plthook->r_type = R_GLOBAL_DATA;
+    }
+#endif
     if (rv != 0) {
         goto error_exit;
     }
@@ -447,7 +461,7 @@ int plthook_enum(plthook_t *plthook, unsigned int *pos, const char **name_out, v
 {
     while (*pos < plthook->plt_cnt) {
         const Elf_Plt_Rel *plt = plthook->plt + *pos;
-        if (ELF_R_TYPE(plt->r_info) == R_JUMP_SLOT) {
+        if (ELF_R_TYPE(plt->r_info) == plthook->r_type) {
             size_t idx = ELF_R_SYM(plt->r_info);
 
             if (idx >= plthook->dynsym_cnt) {

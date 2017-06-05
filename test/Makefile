@@ -42,19 +42,34 @@ ifndef PLTHOOK_C
   SOEXT = so
   LIBS = -ldl -lm
   PLTHOOK_C = plthook_elf.c
+  OTHER_TESTS = linux_specific_tests
 endif
 
 all: libtest.$(SOEXT) testprog$(EXEEXT)
 
 libtest.$(SOEXT): libtest.c libtest.h
-	$(CC_SHARED) -DLIBTEST_DLL -o libtest.$(SOEXT) libtest.c -lm
+	$(CC_SHARED) $(CFLAGS) -DLIBTEST_DLL -o libtest.$(SOEXT) libtest.c -lm
 
 testprog$(EXEEXT): testprog.c ../$(PLTHOOK_C) libtest.h
-	$(CC) -o testprog$(EXEEXT) -I.. testprog.c ../$(PLTHOOK_C) -L. -ltest $(LIBS)
+	$(CC) $(CFLAGS) -o testprog$(EXEEXT) -I.. testprog.c ../$(PLTHOOK_C) -L. -ltest $(LIBS)
 
-check: libtest.$(SOEXT) testprog$(EXEEXT)
+check: run_test $(OTHER_TESTS)
+
+run_test: clean libtest.$(SOEXT) testprog$(EXEEXT)
 	LD_LIBRARY_PATH=. ./testprog$(EXEEXT) open
 	LD_LIBRARY_PATH=. ./testprog$(EXEEXT) open_by_handle
+
+linux_specific_tests:
+	@echo ============ check Partial RELRO ============
+	$(MAKE) run_test CFLAGS=-Wl,-z,relro
+	@echo ============ check Full RELRO ============
+	$(MAKE) run_test CFLAGS=-Wl,-z,relro,-z,now
+	@echo ============ check 32-bit ============
+	$(MAKE) run_test CFLAGS=-m32
+	@echo ============ check Partial RELRO 32-bit ============
+	$(MAKE) run_test "CFLAGS=-m32 -Wl,-z,relro"
+	@echo ============ check Full RELRO 32-bit ============
+	$(MAKE) run_test "CFLAGS=-m32 -Wl,-z,relro,-z,now"
 
 clean:
 	$(RM) libtest.$(SOEXT) testprog$(EXEEXT)
