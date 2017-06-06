@@ -71,6 +71,8 @@
 #if defined __i386__ && __ELF_WORD_SIZE == 64
 #error 32-bit application on 64-bit OS is not supported.
 #endif
+#elif defined _hpux || defined __hpux
+#define ELF_OSABI     ELFOSABI_HPUX
 #else
 #error unsupported OS
 #endif
@@ -97,6 +99,29 @@
 #define PLT_SECTION_NAME ".rel.plt"
 #define R_GLOBAL_DATA R_386_GLOB_DAT
 #define REL_DYN_SECTION_NAME ".rel.dyn"
+#elif 0 /* disabled because not tested */ && (defined __sparcv9 || defined __sparc_v9__)
+#define ELF_DATA      ELFDATA2MSB
+#define E_MACHINE     EM_SPARCV9
+#define R_JUMP_SLOT   R_SPARC_JMP_SLOT
+#define SHT_PLT_REL   SHT_RELA
+#define Elf_Plt_Rel   Elf_Rela
+#define PLT_SECTION_NAME ".rela.plt"
+#elif 0 /* disabled because not tested */ && (defined __sparc || defined __sparc__)
+#define ELF_DATA      ELFDATA2MSB
+#define E_MACHINE     EM_SPARC
+#define E_MACHINE_ALT EM_SPARC32PLUS
+#define R_JUMP_SLOT   R_SPARC_JMP_SLOT
+#define SHT_PLT_REL   SHT_RELA
+#define Elf_Plt_Rel   Elf_Rela
+#define PLT_SECTION_NAME ".rela.plt"
+#elif 0 /* disabled because not tested */ && (defined __ia64 || defined __ia64__)
+#define ELF_DATA      ELFDATA2MSB
+#define E_MACHINE     EM_IA_64
+#define R_JUMP_SLOT   R_IA64_IPLTMSB
+#define SHT_PLT_REL   SHT_RELA
+#define Elf_Plt_Rel   Elf_Rela
+#define PLT_SECTION_NAME ".rela.plt"
+*/
 #else
 #error E_MACHINE is not defined.
 #endif
@@ -564,22 +589,23 @@ static int check_elf_header(const Elf_Ehdr *ehdr)
         set_errmsg("invalid elf version: 0x%02x", ehdr->e_ident[EI_VERSION]);
         return PLTHOOK_INVALID_FILE_FORMAT;
     }
-    if (ehdr->e_ident[EI_OSABI] != ELF_OSABI) {
+    if (ehdr->e_ident[EI_OSABI] != ELF_OSABI
 #ifdef ELF_OSABI_ALT
-        if (ehdr->e_ident[EI_OSABI] != ELF_OSABI_ALT) {
-            set_errmsg("invalid OS ABI: 0x%02x", ehdr->e_ident[EI_OSABI]);
-            return PLTHOOK_INVALID_FILE_FORMAT;
-        }
-#else
+        && ehdr->e_ident[EI_OSABI] != ELF_OSABI_ALT
+#endif
+        ) {
         set_errmsg("invalid OS ABI: 0x%02x", ehdr->e_ident[EI_OSABI]);
         return PLTHOOK_INVALID_FILE_FORMAT;
-#endif
     }
     if (ehdr->e_type != ET_EXEC && ehdr->e_type != ET_DYN) {
         set_errmsg("invalid file type: 0x%04x", ehdr->e_type);
         return PLTHOOK_INVALID_FILE_FORMAT;
     }
-    if (ehdr->e_machine != E_MACHINE) {
+    if (ehdr->e_machine != E_MACHINE
+#ifdef E_MACHINE_ALT
+        && ehdr->e_machine != E_MACHINE_ALT
+#endif
+        ) {
         set_errmsg("invalid machine type: %u", ehdr->e_machine);
         return PLTHOOK_INVALID_FILE_FORMAT;
     }
