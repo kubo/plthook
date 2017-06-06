@@ -326,7 +326,7 @@ static int plthook_open_shared_library(plthook_t **plthook_out, const char *file
 
 static int plthook_open_real(plthook_t **plthook_out, const char *base, const char *filename)
 {
-    const Elf_Ehdr *ehdr = (Elf_Ehdr *)base;
+    Elf_Ehdr ehdr;
     const Elf_Shdr *shdr;
     size_t shdr_size;
     int fd = -1;
@@ -353,30 +353,36 @@ static int plthook_open_real(plthook_t **plthook_out, const char *base, const ch
         return PLTHOOK_OUT_OF_MEMORY;
     }
 
-    /* sanity check */
-    rv = check_elf_header(ehdr);
-    if (rv != 0) {
-        goto error_exit;
-    }
-    if (ehdr->e_type == ET_DYN) {
-        plthook->base = base;
-    }
-    plthook->phdr = (const Elf_Phdr *)(plthook->base + ehdr->e_phoff);
-    plthook->phnum = ehdr->e_phnum;
     fd = open(filename, O_RDONLY, 0);
     if (fd == -1) {
         set_errmsg("Could not open %s: %s", filename, strerror(errno));
         rv = PLTHOOK_FILE_NOT_FOUND;
         goto error_exit;
     }
-    shdr_size = ehdr->e_shnum * ehdr->e_shentsize;
+    if (read(fd, &ehdr, sizeof(ehdr)) != sizeof(ehdr)) {
+        set_errmsg("failed to read the ELF header.");
+        rv = PLTHOOK_INVALID_FILE_FORMAT;
+        goto error_exit;
+    }
+
+    /* sanity check */
+    rv = check_elf_header(&ehdr);
+    if (rv != 0) {
+        goto error_exit;
+    }
+    if (ehdr.e_type == ET_DYN) {
+        plthook->base = base;
+    }
+    plthook->phdr = (const Elf_Phdr *)(plthook->base + ehdr.e_phoff);
+    plthook->phnum = ehdr.e_phnum;
+    shdr_size = ehdr.e_shnum * ehdr.e_shentsize;
     plthook->shdr = calloc(1, shdr_size);
     if (plthook->shdr == NULL) {
         set_errmsg("failed to allocate memory: %" SIZE_T_FMT " bytes", shdr_size);
         rv = PLTHOOK_OUT_OF_MEMORY;
         goto error_exit;
     }
-    offset = ehdr->e_shoff;
+    offset = ehdr.e_shoff;
     if ((rv = lseek(fd, offset, SEEK_SET)) != offset) {
         set_errmsg("failed to seek to the section header table.");
         rv = PLTHOOK_INVALID_FILE_FORMAT;
@@ -387,15 +393,15 @@ static int plthook_open_real(plthook_t **plthook_out, const char *base, const ch
         rv = PLTHOOK_INVALID_FILE_FORMAT;
         goto error_exit;
     }
-    plthook->shnum = ehdr->e_shnum;
-    plthook->shstrtab_size = plthook->shdr[ehdr->e_shstrndx].sh_size;
+    plthook->shnum = ehdr.e_shnum;
+    plthook->shstrtab_size = plthook->shdr[ehdr.e_shstrndx].sh_size;
     plthook->shstrtab = malloc(plthook->shstrtab_size);
     if (plthook->shstrtab == NULL) {
         set_errmsg("failed to allocate memory: %" SIZE_T_FMT " bytes", plthook->shstrtab_size);
         rv = PLTHOOK_OUT_OF_MEMORY;
         goto error_exit;
     }
-    offset = plthook->shdr[ehdr->e_shstrndx].sh_offset;
+    offset = plthook->shdr[ehdr.e_shstrndx].sh_offset;
     if (lseek(fd, offset, SEEK_SET) != offset) {
         set_errmsg("failed to seek to the section header string table.");
         rv = PLTHOOK_INVALID_FILE_FORMAT;
@@ -410,13 +416,13 @@ static int plthook_open_real(plthook_t **plthook_out, const char *base, const ch
     if (page_size == 0) {
         page_size = sysconf(_SC_PAGESIZE);
     }
-    offset = ehdr->e_phoff;
+    offset = ehdr.e_phoff;
     if ((rv = lseek(fd, offset, SEEK_SET)) != offset) {
         set_errmsg("failed to seek to the program header table.");
         rv = PLTHOOK_INVALID_FILE_FORMAT;
         goto error_exit;
     }
-    for (idx = 0; idx < ehdr->e_phnum; idx++) {
+    for (idx = 0; idx < ehdr.e_phnum; idx++) {
         Elf_Phdr phdr;
         if (read(fd, &phdr, sizeof(phdr)) != sizeof(phdr)) {
             set_errmsg("failed to read the program header table.");
