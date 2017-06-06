@@ -131,6 +131,8 @@
 #define ELF_CLASS     ELFCLASS64
 #endif
 #define SIZE_T_FMT "lu"
+#define ELF_WORD_FMT "u"
+#define ELF_XWORD_FMT "lu"
 #define Elf_Half Elf64_Half
 #define Elf_Xword Elf64_Xword
 #define Elf_Addr Elf64_Addr
@@ -151,8 +153,15 @@
 #define ELF_CLASS     ELFCLASS32
 #endif
 #define SIZE_T_FMT "u"
+#ifdef __sun
+#define ELF_WORD_FMT "lu"
+#define ELF_XWORD_FMT "lu"
+#else
+#define ELF_WORD_FMT "u"
+#define ELF_XWORD_FMT "u"
+#endif
 #define Elf_Half Elf32_Half
-#define Elf_Xword Elf32_Xword
+#define Elf_Xword Elf32_Word
 #define Elf_Addr Elf32_Addr
 #define Elf_Ehdr Elf32_Ehdr
 #define Elf_Phdr Elf32_Phdr
@@ -273,7 +282,7 @@ static int plthook_open_executable(plthook_t **plthook_out)
     char fname[128];
     int fd;
 
-    sprintf(fname, "/proc/%d/map", pid);
+    sprintf(fname, "/proc/%ld/map", (long)pid);
     fd = open(fname, O_RDONLY);
     if (fd == -1) {
         set_errmsg("Could not open %s: %s", fname,
@@ -287,7 +296,7 @@ static int plthook_open_executable(plthook_t **plthook_out)
         return PLTHOOK_INTERNAL_ERROR;
     }
     close(fd);
-    sprintf(fname, "/proc/%d/object/a.out", pid);
+    sprintf(fname, "/proc/%ld/object/a.out", (long)pid);
     return plthook_open_real(plthook_out, (const char*)prmap.pr_vaddr, fname);
 #elif defined __FreeBSD__
     return plthook_open_shared_library(plthook_out, NULL);
@@ -428,12 +437,12 @@ static int plthook_open_real(plthook_t **plthook_out, const char *base, const ch
         goto error_exit;
     }
     if (shdr->sh_type != SHT_DYNSYM) {
-        set_errmsg("The type of .dynsym section should be SHT_DYNSYM but %d.", shdr->sh_type);
+        set_errmsg("The type of .dynsym section should be SHT_DYNSYM but %" ELF_WORD_FMT ".", shdr->sh_type);
         rv = PLTHOOK_INVALID_FILE_FORMAT;
         goto error_exit;
     }
     if (shdr->sh_entsize != sizeof(Elf_Sym)) {
-        set_errmsg("The size of a section header entry should be sizeof(Elf_Sym)(%" SIZE_T_FMT ") but %" SIZE_T_FMT ".",
+        set_errmsg("The size of a section header entry should be sizeof(Elf_Sym)(%" SIZE_T_FMT ") but %" ELF_XWORD_FMT ".",
                    sizeof(Elf_Sym), shdr->sh_entsize);
         rv = PLTHOOK_INVALID_FILE_FORMAT;
         goto error_exit;
@@ -446,7 +455,7 @@ static int plthook_open_real(plthook_t **plthook_out, const char *base, const ch
         goto error_exit;
     }
     if (shdr->sh_type != SHT_STRTAB) {
-        set_errmsg("The type of .dynstrx section should be SHT_STRTAB but %d.", shdr->sh_type);
+        set_errmsg("The type of .dynstrx section should be SHT_STRTAB but %" ELF_WORD_FMT ".", shdr->sh_type);
         rv = PLTHOOK_INVALID_FILE_FORMAT;
         goto error_exit;
     }
@@ -465,7 +474,7 @@ static int plthook_open_real(plthook_t **plthook_out, const char *base, const ch
         goto error_exit;
     }
     if (shdr->sh_entsize != sizeof(Elf_Plt_Rel)) {
-        set_errmsg("invalid " PLT_SECTION_NAME " table entry size: %" SIZE_T_FMT, shdr->sh_entsize);
+        set_errmsg("invalid " PLT_SECTION_NAME " table entry size: %" ELF_XWORD_FMT, shdr->sh_entsize);
         rv = PLTHOOK_INVALID_FILE_FORMAT;
         goto error_exit;
     }
@@ -610,7 +619,7 @@ static int check_elf_header(const Elf_Ehdr *ehdr)
         return PLTHOOK_INVALID_FILE_FORMAT;
     }
     if (ehdr->e_version != EV_CURRENT) {
-        set_errmsg("invalid object file version: %u", ehdr->e_version);
+        set_errmsg("invalid object file version: %" ELF_WORD_FMT, ehdr->e_version);
         return PLTHOOK_INVALID_FILE_FORMAT;
     }
     if (ehdr->e_ehsize != sizeof(Elf_Ehdr)) {
@@ -636,7 +645,7 @@ static int find_section(plthook_t *image, const char *name, const Elf_Shdr **out
 
     while (shdr < shdr_end) {
         if (shdr->sh_name + namelen >= image->shstrtab_size) {
-            set_errmsg("too big section header string table index: %u", shdr->sh_name);
+            set_errmsg("too big section header string table index: %" ELF_WORD_FMT, shdr->sh_name);
             return PLTHOOK_INVALID_FILE_FORMAT;
         }
         if (strcmp(image->shstrtab + shdr->sh_name, name) == 0) {
