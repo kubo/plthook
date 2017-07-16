@@ -4,9 +4,8 @@ matrix:
       env: OS=linux
       sudo: required
     - os: linux
+      # Use QEMU 2.2 in ppa:wgrant/scalingstack-ppc64el.
       env: OS=linux-cross CROSS=1
-      # QEMU on Ubuntu precise is too old to run tests.
-      # It doesn't fake /proc/self/maps.
       dist: trusty
       sudo: required
     - os: osx
@@ -15,6 +14,7 @@ language: c
 before_install:
   - if [[ "$OS" == "linux" ]]; then sudo apt-get update -qq; fi
   - if [[ "$OS" == "linux" ]]; then sudo apt-get install gcc-multilib; fi
+  - if [[ "$OS" == "linux-cross" ]]; then sudo add-apt-repository ppa:wgrant/scalingstack-ppc64el -y; fi
   - if [[ "$OS" == "linux-cross" ]]; then sudo apt-get update -qq; fi
   - if [[ "$OS" == "linux-cross" ]]; then sudo apt-get install qemu-user gcc-arm-linux-gnueabi gcc-arm-linux-gnueabihf; fi
 script:
