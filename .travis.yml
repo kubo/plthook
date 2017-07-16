@@ -3,8 +3,7 @@ matrix:
     - os: linux
       env: OS=linux
     - os: linux
-      env: OS=linux-cross
-      env: CROSS=1
+      env: OS=linux-cross CROSS=1
     - os: osx
       env: OS=osx
 language: c
