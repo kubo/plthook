@@ -97,6 +97,12 @@
 #define PLT_SECTION_NAME ".rel.plt"
 #define R_GLOBAL_DATA R_386_GLOB_DAT
 #define REL_DYN_SECTION_NAME ".rel.dyn"
+#elif defined __arm__ || defined __arm
+#define E_MACHINE     EM_ARM
+#define R_JUMP_SLOT   R_ARM_JUMP_SLOT
+#define SHT_PLT_REL   SHT_REL
+#define Elf_Plt_Rel   Elf_Rel
+#define PLT_SECTION_NAME ".rel.plt"
 #elif 0 /* disabled because not tested */ && (defined __sparcv9 || defined __sparc_v9__)
 #define E_MACHINE     EM_SPARCV9
 #define R_JUMP_SLOT   R_SPARC_JMP_SLOT

@@ -1,10 +1,17 @@
 matrix:
   include:
     - os: linux
+      env: OS=linux
+    - os: linux
+      env: OS=linux-cross
+      env: CROSS=1
     - os: osx
+      env: OS=osx
 language: c
 before_install:
-  - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then sudo apt-get update -qq; fi
-  - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then sudo apt-get install gcc-multilib; fi
+  - if [[ "$OS" == "linux" ]]; then sudo apt-get update -qq; fi
+  - if [[ "$OS" == "linux" ]]; then sudo apt-get install gcc-multilib; fi
+  - if [[ "$OS" == "linux-cross" ]]; then sudo apt-get update -qq; fi
+  - if [[ "$OS" == "linux-cross" ]]; then sudo apt-get install qemu-user gcc-arm-linux-gnueabi gcc-arm-linux-gnueabihf; fi
 script:
-  - cd test && make && make check
+  - cd test && make check CROSS=$CROSS
