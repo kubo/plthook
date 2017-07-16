@@ -193,10 +193,10 @@ int main(int argc, char **argv)
         break;
     }
     test_plthook_enum(plthook, funcs_called_by_main);
-    assert(plthook_replace(plthook, "ceil_cdecl", ceil_cdecl_hook_func, (void**)&ceil_cdecl_old_func) == 0);
+    assert(plthook_replace(plthook, "ceil_cdecl", (void*)ceil_cdecl_hook_func, (void**)&ceil_cdecl_old_func) == 0);
 #if defined _WIN32 || defined __CYGWIN__
-    assert(plthook_replace(plthook, "ceil_stdcall", ceil_stdcall_hook_func, (void**)&ceil_stdcall_old_func) == 0);
-    assert(plthook_replace(plthook, "ceil_fastcall", ceil_fastcall_hook_func, (void**)&ceil_fastcall_old_func) == 0);
+    assert(plthook_replace(plthook, "ceil_stdcall", (void*)ceil_stdcall_hook_func, (void**)&ceil_stdcall_old_func) == 0);
+    assert(plthook_replace(plthook, "ceil_fastcall", (void*)ceil_fastcall_hook_func, (void**)&ceil_fastcall_old_func) == 0);
 #endif
     plthook_close(plthook);
 
@@ -217,7 +217,7 @@ int main(int argc, char **argv)
     }
 
     test_plthook_enum(plthook, funcs_called_by_libtest);
-    assert(plthook_replace(plthook, "ceil", ceil_hook_func, NULL) == 0);
+    assert(plthook_replace(plthook, "ceil", (void*)ceil_hook_func, NULL) == 0);
     plthook_close(plthook);
 
     arg = 3.7;
