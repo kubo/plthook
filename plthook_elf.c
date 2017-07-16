@@ -78,7 +78,6 @@
 #endif
 
 #if defined __x86_64__ || defined __x86_64
-#define ELF_DATA      ELFDATA2LSB
 #define E_MACHINE     EM_X86_64
 #ifdef R_X86_64_JUMP_SLOT
 #define R_JUMP_SLOT   R_X86_64_JUMP_SLOT
@@ -91,7 +90,6 @@
 #define R_GLOBAL_DATA R_X86_64_GLOB_DAT
 #define REL_DYN_SECTION_NAME ".rela.dyn"
 #elif defined __i386__ || defined __i386
-#define ELF_DATA      ELFDATA2LSB
 #define E_MACHINE     EM_386
 #define R_JUMP_SLOT   R_386_JMP_SLOT
 #define SHT_PLT_REL   SHT_REL
@@ -100,14 +98,12 @@
 #define R_GLOBAL_DATA R_386_GLOB_DAT
 #define REL_DYN_SECTION_NAME ".rel.dyn"
 #elif 0 /* disabled because not tested */ && (defined __sparcv9 || defined __sparc_v9__)
-#define ELF_DATA      ELFDATA2MSB
 #define E_MACHINE     EM_SPARCV9
 #define R_JUMP_SLOT   R_SPARC_JMP_SLOT
 #define SHT_PLT_REL   SHT_RELA
 #define Elf_Plt_Rel   Elf_Rela
 #define PLT_SECTION_NAME ".rela.plt"
 #elif 0 /* disabled because not tested */ && (defined __sparc || defined __sparc__)
-#define ELF_DATA      ELFDATA2MSB
 #define E_MACHINE     EM_SPARC
 #define E_MACHINE_ALT EM_SPARC32PLUS
 #define R_JUMP_SLOT   R_SPARC_JMP_SLOT
@@ -115,13 +111,11 @@
 #define Elf_Plt_Rel   Elf_Rela
 #define PLT_SECTION_NAME ".rela.plt"
 #elif 0 /* disabled because not tested */ && (defined __ia64 || defined __ia64__)
-#define ELF_DATA      ELFDATA2MSB
 #define E_MACHINE     EM_IA_64
 #define R_JUMP_SLOT   R_IA64_IPLTMSB
 #define SHT_PLT_REL   SHT_RELA
 #define Elf_Plt_Rel   Elf_Rela
 #define PLT_SECTION_NAME ".rela.plt"
-*/
 #else
 #error E_MACHINE is not defined.
 #endif
@@ -587,6 +581,10 @@ const char *plthook_error(void)
 
 static int check_elf_header(const Elf_Ehdr *ehdr)
 {
+    static const unsigned short s = 1;
+    /* Check endianness at runtime. */
+    unsigned char elfdata = (*(const char*)&s) ? ELFDATA2LSB : ELFDATA2MSB;
+
     if (memcmp(ehdr->e_ident, ELFMAG, SELFMAG) != 0) {
         set_errmsg("invalid file signature: 0x%02x,0x%02x,0x%02x,0x%02x",
                    ehdr->e_ident[0], ehdr->e_ident[1], ehdr->e_ident[2], ehdr->e_ident[3]);
@@ -596,7 +594,7 @@ static int check_elf_header(const Elf_Ehdr *ehdr)
         set_errmsg("invalid elf class: 0x%02x", ehdr->e_ident[EI_CLASS]);
         return PLTHOOK_INVALID_FILE_FORMAT;
     }
-    if (ehdr->e_ident[EI_DATA] != ELF_DATA) {
+    if (ehdr->e_ident[EI_DATA] != elfdata) {
         set_errmsg("invalid elf data: 0x%02x", ehdr->e_ident[EI_DATA]);
         return PLTHOOK_INVALID_FILE_FORMAT;
     }
