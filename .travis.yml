@@ -2,8 +2,13 @@ matrix:
   include:
     - os: linux
       env: OS=linux
+      sudo: required
     - os: linux
       env: OS=linux-cross CROSS=1
+      # QEMU on Ubuntu precise is too old to run tests.
+      # It doesn't fake /proc/self/maps.
+      dist: trusty
+      sudo: required
     - os: osx
       env: OS=osx
 language: c
