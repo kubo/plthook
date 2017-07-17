@@ -20,7 +20,7 @@ ifeq ($(UNAME_S),Linux)
   TESTS = linux_tests
   ifneq ($(TARGET_PLATFORM),)
     CC = $(TARGET_PLATFORM)-gcc
-    QEMU_CMD = qemu-$(shell echo $(TARGET_PLATFORM) | sed -e 's/-.*//') -L /usr/$(TARGET_PLATFORM)
+    QEMU_CMD = qemu-$(or $(QEMU_ARCH),$(shell echo $(TARGET_PLATFORM) | sed -e 's/-.*//')) -L /usr/$(TARGET_PLATFORM)
   else ifeq ($(CROSS),1)
     # Prerequisite packages on Ubuntu:
     #   either qemu-user or qemu-user-static
@@ -93,10 +93,21 @@ linux_m32_tests:
 	$(MAKE) run_tests "EXTRA_CFLAGS=-m32 -Wl,-z,relro,-z,now"
 
 linux_cross_tests:
+	@echo
 	@echo ============ arm-linux-gnueabi ============
 	$(MAKE) check TARGET_PLATFORM=arm-linux-gnueabi
+	@echo
 	@echo ============ arm-linux-gnueabihf ============
 	$(MAKE) check TARGET_PLATFORM=arm-linux-gnueabihf
+	@echo
+	@echo ============ aarch64-linux-gnu ============
+	$(MAKE) check TARGET_PLATFORM=aarch64-linux-gnu
+	@echo
+	@echo ============ powerpc-linux-gnu ============
+	$(MAKE) check TARGET_PLATFORM=powerpc-linux-gnu QEMU_ARCH=ppc
+	@echo
+	@echo ============ powerpc64le-linux-gnu ============
+	$(MAKE) check TARGET_PLATFORM=powerpc64le-linux-gnu QEMU_ARCH=ppc64le
 
 clean:
 	$(RM) libtest.$(SOEXT) testprog$(EXEEXT)
