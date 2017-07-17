@@ -65,7 +65,8 @@
 #define ELF_OSABI     ELFOSABI_SYSV
 #define ELF_OSABI_ALT ELFOSABI_LINUX
 #elif defined __sun
-#define ELF_OSABI     ELFOSABI_SOLARIS
+#define ELF_OSABI     ELFOSABI_SYSV
+#define ELF_OSABI_ALT ELFOSABI_SOLARIS
 #elif defined __FreeBSD__
 #define ELF_OSABI     ELFOSABI_FREEBSD
 #if defined __i386__ && __ELF_WORD_SIZE == 64
@@ -77,13 +78,13 @@
 #error unsupported OS
 #endif
 
+#if !defined(R_X86_64_JUMP_SLOT) && defined(R_X86_64_JMP_SLOT)
+#define R_X86_64_JUMP_SLOT R_X86_64_JMP_SLOT
+#endif
+
 #if defined __x86_64__ || defined __x86_64
 #define E_MACHINE     EM_X86_64
-#ifdef R_X86_64_JUMP_SLOT
 #define R_JUMP_SLOT   R_X86_64_JUMP_SLOT
-#else
-#define R_JUMP_SLOT   R_X86_64_JMP_SLOT
-#endif
 #define SHT_PLT_REL   SHT_RELA
 #define Elf_Plt_Rel   Elf_Rela
 #define PLT_SECTION_NAME ".rela.plt"
