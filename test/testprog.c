@@ -11,6 +11,27 @@
 #include <dlfcn.h>
 #endif
 
+#define CHK_PH(func) do { \
+    if (func != 0) { \
+        fprintf(stderr, "%s error: %s\n", #func, plthook_error()); \
+        exit(1); \
+    } \
+} while (0)
+
+#define CHK_DBL_EQ(val1, val2) do { \
+    if (val1 != val2) { \
+        fprintf(stderr, "%f != %f at line %d\n", val1, val2, __LINE__); \
+        exit(1); \
+    } \
+} while (0)
+
+#define CHK_DBL_NEQ(val1, val2) do { \
+    if (val1 == val2) { \
+        fprintf(stderr, "%f == %f at line %d\n", val1, val2, __LINE__); \
+        exit(1); \
+    } \
+} while (0)
+
 typedef struct {
     const char *name;
     int enumerated;
@@ -167,20 +188,20 @@ int main(int argc, char **argv)
     ceil_fastcall(arg);
 #endif
     /* ensure that *_result and *_arg are not changed. */
-    assert(ceil_arg == 0.0);
-    assert(ceil_result == 0.0);
-    assert(ceil_cdecl_arg == 0.0);
-    assert(ceil_cdecl_result == 0.0);
+    CHK_DBL_EQ(ceil_arg, 0.0);
+    CHK_DBL_EQ(ceil_result, 0.0);
+    CHK_DBL_EQ(ceil_cdecl_arg, 0.0);
+    CHK_DBL_EQ(ceil_cdecl_result, 0.0);
 #if defined _WIN32 || defined __CYGWIN__
-    assert(ceil_stdcall_arg == 0.0);
-    assert(ceil_stdcall_result == 0.0);
-    assert(ceil_fastcall_arg == 0.0);
-    assert(ceil_fastcall_result == 0.0);
+    CHK_DBL_EQ(ceil_stdcall_arg, 0.0);
+    CHK_DBL_EQ(ceil_stdcall_result, 0.0);
+    CHK_DBL_EQ(ceil_fastcall_arg, 0.0);
+    CHK_DBL_EQ(ceil_fastcall_result, 0.0);
 #endif
 
     switch (open_mode) {
     case OPEN_MODE_DEFAULT:
-        assert(plthook_open(&plthook, NULL) == 0);
+        CHK_PH(plthook_open(&plthook, NULL));
         break;
     case OPEN_MODE_BY_HANDLE:
 #ifdef WIN32
@@ -189,21 +210,21 @@ int main(int argc, char **argv)
         handle = dlopen(NULL, RTLD_LAZY);
 #endif
         assert(handle != NULL);
-        assert(plthook_open_by_handle(&plthook, handle) == 0);
+        CHK_PH(plthook_open_by_handle(&plthook, handle));
         break;
     }
     test_plthook_enum(plthook, funcs_called_by_main);
-    assert(plthook_replace(plthook, "ceil_cdecl", (void*)ceil_cdecl_hook_func, (void**)&ceil_cdecl_old_func) == 0);
+    CHK_PH(plthook_replace(plthook, "ceil_cdecl", (void*)ceil_cdecl_hook_func, (void**)&ceil_cdecl_old_func));
 #if defined _WIN32 || defined __CYGWIN__
-    assert(plthook_replace(plthook, "ceil_stdcall", (void*)ceil_stdcall_hook_func, (void**)&ceil_stdcall_old_func) == 0);
-    assert(plthook_replace(plthook, "ceil_fastcall", (void*)ceil_fastcall_hook_func, (void**)&ceil_fastcall_old_func) == 0);
+    CHK_PH(plthook_replace(plthook, "ceil_stdcall", (void*)ceil_stdcall_hook_func, (void**)&ceil_stdcall_old_func));
+    CHK_PH(plthook_replace(plthook, "ceil_fastcall", (void*)ceil_fastcall_hook_func, (void**)&ceil_fastcall_old_func));
 #endif
     plthook_close(plthook);
 
 
     switch (open_mode) {
     case OPEN_MODE_DEFAULT:
-        assert(plthook_open(&plthook, filename) == 0);
+        CHK_PH(plthook_open(&plthook, filename));
         break;
     case OPEN_MODE_BY_HANDLE:
 #ifdef WIN32
@@ -212,38 +233,38 @@ int main(int argc, char **argv)
         handle = dlopen(filename, RTLD_LAZY | RTLD_NOLOAD);
 #endif
         assert(handle != NULL);
-        assert(plthook_open_by_handle(&plthook, handle) == 0);
+        CHK_PH(plthook_open_by_handle(&plthook, handle));
         break;
     }
 
     test_plthook_enum(plthook, funcs_called_by_libtest);
-    assert(plthook_replace(plthook, "ceil", (void*)ceil_hook_func, NULL) == 0);
+    CHK_PH(plthook_replace(plthook, "ceil", (void*)ceil_hook_func, NULL));
     plthook_close(plthook);
 
     arg = 3.7;
     result = ceil_cdecl(arg);
-    assert(result != 0.0);
-    assert(ceil_cdecl_arg == arg);
-    assert(ceil_cdecl_result == result);
-    assert(ceil_result == result);
-    assert(ceil_arg == arg);
+    CHK_DBL_NEQ(result, 0.0);
+    CHK_DBL_EQ(ceil_cdecl_arg, arg);
+    CHK_DBL_EQ(ceil_cdecl_result, result);
+    CHK_DBL_EQ(ceil_result, result);
+    CHK_DBL_EQ(ceil_arg, arg);
 
 #if defined _WIN32 || defined __CYGWIN__
     arg = 5.3;
     result = ceil_stdcall(arg);
-    assert(result != 0.0);
-    assert(ceil_stdcall_arg == arg);
-    assert(ceil_stdcall_result == result);
-    assert(ceil_result == result);
-    assert(ceil_arg == arg);
+    CHK_DBL_NEQ(result, 0.0);
+    CHK_DBL_EQ(ceil_stdcall_arg, arg);
+    CHK_DBL_EQ(ceil_stdcall_result, result);
+    CHK_DBL_EQ(ceil_result, result);
+    CHK_DBL_EQ(ceil_arg, arg);
 
     arg = 8.8;
     result = ceil_fastcall(arg);
-    assert(result != 0.0);
-    assert(ceil_fastcall_arg == arg);
-    assert(ceil_fastcall_result == result);
-    assert(ceil_result == result);
-    assert(ceil_arg == arg);
+    CHK_DBL_NEQ(result, 0.0);
+    CHK_DBL_EQ(ceil_fastcall_arg, arg);
+    CHK_DBL_EQ(ceil_fastcall_result, result);
+    CHK_DBL_EQ(ceil_result, result);
+    CHK_DBL_EQ(ceil_arg, arg);
 #endif
 
     printf("success\n");
