@@ -13,7 +13,7 @@ matrix:
 language: c
 before_install:
   - if [[ "$OS" == "linux" ]]; then sudo apt-get update -qq; fi
-  - if [[ "$OS" == "linux" ]]; then sudo apt-get install gcc-multilib; fi
+  - if [[ "$OS" == "linux" ]]; then sudo apt-get install gcc-multilib valgrind; fi
   - if [[ "$OS" == "linux-cross" ]]; then sudo add-apt-repository ppa:wgrant/scalingstack-ppc64el -y; fi
   - if [[ "$OS" == "linux-cross" ]]; then sudo apt-get update -qq; fi
   - if [[ "$OS" == "linux-cross" ]]; then sudo apt-get install qemu-user gcc-arm-linux-gnueabi gcc-arm-linux-gnueabihf gcc-aarch64-linux-gnu gcc-powerpc-linux-gnu gcc-powerpc64le-linux-gnu; fi

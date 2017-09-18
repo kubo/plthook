@@ -83,6 +83,10 @@ linux_tests:
 	$(MAKE) run_tests "EXTRA_CFLAGS=-Wl,-z,relro"
 	@echo ------------ check Full RELRO ------------
 	$(MAKE) run_tests "EXTRA_CFLAGS=-Wl,-z,relro,-z,now"
+	@echo ------------ check on valgrind ------------
+	$(MAKE) run_tests "EXTRA_CFLAGS=" QEMU_CMD=valgrind
+	@echo ------------ check Full RELRO on valgrind  ------------
+	$(MAKE) run_tests "EXTRA_CFLAGS=-Wl,-z,relro,-z,now" QEMU_CMD=valgrind
 
 linux_m32_tests:
 	@echo ------------ check 32-bit ------------
@@ -91,6 +95,10 @@ linux_m32_tests:
 	$(MAKE) run_tests "EXTRA_CFLAGS=-m32 -Wl,-z,relro"
 	@echo ------------ check 32-bit Full RELRO ------------
 	$(MAKE) run_tests "EXTRA_CFLAGS=-m32 -Wl,-z,relro,-z,now"
+	@echo ------------ check 32-bit on valgrind ------------
+	$(MAKE) run_tests "EXTRA_CFLAGS=-m32" QEMU_CMD=valgrind
+	@echo ------------ check 32-bit Full RELRO on valgrind ------------
+	$(MAKE) run_tests "EXTRA_CFLAGS=-m32 -Wl,-z,relro,-z,now" QEMU_CMD=valgrind
 
 linux_cross_tests:
 	@echo
