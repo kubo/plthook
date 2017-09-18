@@ -274,9 +274,10 @@ static int plthook_open_executable(plthook_t **plthook_out)
 {
 #if defined __linux__
     /* Open the main program. */
-    char buf[128];
+    char buf[PATH_MAX];
     FILE *fp = fopen("/proc/self/maps", "r");
     unsigned long base;
+    ssize_t rv;
 
     if (fp == NULL) {
         set_errmsg("Could not open /proc/self/maps: %s",
@@ -294,7 +295,25 @@ static int plthook_open_executable(plthook_t **plthook_out)
         set_errmsg("invalid /proc/self/maps format: %s", buf);
         return PLTHOOK_INTERNAL_ERROR;
     }
-    return plthook_open_real(plthook_out, (const char*)base, "/proc/self/exe");
+    /*
+     * Workaround to run on valgrind:
+     *
+     *   When an executable runs on valgrind, open("/proc/self/exe", O_RDONLY)
+     *   opens the valgrind executable and plthook doesn't work.
+     *   Valgrind seems to trap readlink("/proc/self/exe", ...) and
+     *   returns the executable running on valgrind.
+     */
+    rv = readlink("/proc/self/exe", buf, sizeof(buf));
+    if (rv == -1) {
+        set_errmsg("readlink(\"/proc/self/exe\", ...) failed. (errno=%d)", errno);
+        return PLTHOOK_INTERNAL_ERROR;
+    }
+    if (rv >= sizeof(buf)) {
+        set_errmsg("too long executable path");
+        return PLTHOOK_INTERNAL_ERROR;
+    }
+    buf[rv] = '\0';
+    return plthook_open_real(plthook_out, (const char*)base, buf);
 #elif defined __sun
     prmap_t prmap;
     pid_t pid = getpid();
