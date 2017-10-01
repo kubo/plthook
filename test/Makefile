@@ -4,7 +4,7 @@
 
 UNAME_S := $(shell uname -s)
 
-CC = gcc
+CC = gcc -g
 CFLAGS_SHARED = -shared -fPIC
 CFLAGS = $(CFLAGS_WARNING) $(EXTRA_CFLAGS)
 CFLAGS_WARNING = -Wall
@@ -17,7 +17,7 @@ QEMU_CMD =
 
 ifeq ($(UNAME_S),Linux)
   # Linux
-  TESTS = linux_tests
+  TESTS = relro_pie_tests
   ifneq ($(TARGET_PLATFORM),)
     CC = $(TARGET_PLATFORM)-gcc
     QEMU_CMD = qemu-$(or $(QEMU_ARCH),$(shell echo $(TARGET_PLATFORM) | sed -e 's/-.*//')) -L /usr/$(TARGET_PLATFORM)
@@ -29,10 +29,16 @@ ifeq ($(UNAME_S),Linux)
     TESTS = linux_cross_tests
   else ifeq ($(shell uname -m),x86_64)
     # Prerequisite packages on Ubuntu:
-    #   gcc-multilib
-    TESTS += linux_m32_tests
-    TESTS += linux_tests_on_valgrind
+    #   gcc-multilib libc6-dbg:i386 valgrind
+    TESTS += relro_pie_m32_tests
+    TESTS += relro_pie_tests_on_valgrind
   endif
+endif
+
+ifeq ($(UNAME_S),FreeBSD)
+  # FreeBSD
+  TESTS = relro_pie_tests
+  LIBS = -lm -lutil
 endif
 
 ifeq ($(findstring MINGW32_NT,$(UNAME_S)),MINGW32_NT)
@@ -66,7 +72,7 @@ libtest.$(SOEXT): libtest.c libtest.h
 	$(CC) $(CFLAGS_SHARED) $(CFLAGS) -DLIBTEST_DLL -o libtest.$(SOEXT) libtest.c -lm
 
 testprog$(EXEEXT): testprog.c ../$(PLTHOOK_C) libtest.h
-	$(CC) $(CFLAGS) -o testprog$(EXEEXT) -I.. testprog.c ../$(PLTHOOK_C) -L. -ltest $(LIBS)
+	$(CC) $(CFLAGS_EXE) $(CFLAGS) -o testprog$(EXEEXT) -I.. testprog.c ../$(PLTHOOK_C) -L. -ltest $(LIBS)
 
 run_tests: clean libtest.$(SOEXT) testprog$(EXEEXT)
 	cp libtest.$(SOEXT) testprog$(EXEEXT) ~/
@@ -77,23 +83,27 @@ check: $(TESTS)
 
 basic_tests: run_tests
 
-linux_tests:
+relro_pie_tests:
 	@echo ------------ check ------------
 	$(MAKE) run_tests "EXTRA_CFLAGS="
 	@echo ------------ check Partial RELRO ------------
 	$(MAKE) run_tests "EXTRA_CFLAGS=-Wl,-z,relro"
 	@echo ------------ check Full RELRO ------------
 	$(MAKE) run_tests "EXTRA_CFLAGS=-Wl,-z,relro,-z,now"
+	@echo ------------ check PIE ------------
+	$(MAKE) run_tests "CFLAGS_EXE=-fPIE -pie"
 
-linux_m32_tests:
+relro_pie_m32_tests:
 	@echo ------------ check 32-bit ------------
 	$(MAKE) run_tests "EXTRA_CFLAGS=-m32"
 	@echo ------------ check 32-bit Partial RELRO ------------
 	$(MAKE) run_tests "EXTRA_CFLAGS=-m32 -Wl,-z,relro"
 	@echo ------------ check 32-bit Full RELRO ------------
 	$(MAKE) run_tests "EXTRA_CFLAGS=-m32 -Wl,-z,relro,-z,now"
+	@echo ------------ check 32-bit PIE ------------
+	$(MAKE) run_tests "EXTRA_CFLAGS=-m32" "CFLAGS_EXE=-fPIE -pie"
 
-linux_tests_on_valgrind:
+relro_pie_tests_on_valgrind:
 	@echo ------------ check on valgrind ------------
 	$(MAKE) run_tests "EXTRA_CFLAGS=" QEMU_CMD=valgrind
 	@echo ------------ check Full RELRO on valgrind  ------------

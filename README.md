@@ -13,6 +13,17 @@ or [IAT (Import Address Table)][IAT] entries in PE format used on Windows.
 
 [IAT]: https://en.wikipedia.org/wiki/Portable_Executable#Import_Table
 
+Changes
+-------
+
+**2017-10-01:** `plthook_elf.c` was rewritten. Plthook had needed to
+read files on filesystem to get various information about target
+object files. It now do it only for full RELRO object files.
+Note that plthook before 2017-10-01 gets segmentation fault while
+hooking a [prelinked file](https://en.wikipedia.org/wiki/Prelink#Linux) on Linux.
+
+**2017-09-18:** Fixed for processes on [valgrind](valgrind.org/) on Linux.
+
 Usage
 -----
 
@@ -89,10 +100,6 @@ Supported Platforms
 | FreeBSD i386 and x86_64 except i386 program on x86_64 OS | plthook_elf.c |
 
 *1 These are tested on [QEMU][], which version must be 2.2 or later, user-mode emulation.
-
-IMO, unix-like platforms except AIX and HP-UX pa-risc(32bit) could be supported
-by `plthook_elf.c` with small modification as long as the object file format
-is [ELF][].
 
 [QEMU]: http://www.qemu.org/
 [ELF]: https://en.wikipedia.org/wiki/Executable_and_Linkable_Format
