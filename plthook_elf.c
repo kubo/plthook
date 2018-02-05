@@ -201,6 +201,28 @@ static int plthook_open_owned(plthook_t **plthook_out, struct link_map *lmap);
 static int check_elf_header(const Elf_Ehdr *ehdr);
 static void set_errmsg(const char *fmt, ...) __attribute__((__format__ (__printf__, 1, 2)));
 
+static char* get_executable() {
+    ssize_t size = 0;
+    ssize_t bufsize = 8;
+    char* linkname = NULL;
+
+    while(1) {
+        linkname = realloc(linkname, bufsize);
+        size = readlink("/proc/self/exe", linkname, bufsize);
+        if(size == -1) {
+            free(linkname);
+            return NULL;
+        }
+        if(size + 1 < bufsize) {
+            break;
+        }
+        bufsize *= 2;
+    }
+
+    linkname[size] = 0;
+    return linkname;
+}
+
 struct dh_iter {
     const char* fname;
     char* addr;
@@ -223,7 +245,7 @@ static int dl_iterate_cb(struct dl_phdr_info *info, size_t size, void *data) {
 
     int match = 0;
     if (iter->fname) {
-        match = strcmp(dlpi_name_abs, iter->fname) == 0;
+        match = strcmp(info->dlpi_name, iter->fname) == 0 || (strcmp(dlpi_name_abs, iter->fname) == 0);
     } else {
         for (ElfW(Half) phdr_idx = 0; !match && phdr_idx < info->dlpi_phnum; ++phdr_idx) {
             const Elf_Phdr *phdr = &info->dlpi_phdr[phdr_idx];
@@ -351,7 +373,13 @@ static int plthook_open_executable(plthook_t **plthook_out)
 {
 #if defined __linux__
 #if defined __ANDROID__
-    struct link_map *lmap = create_link_map_fname("");
+    char* exe = get_executable();
+    if (!exe) {
+        set_errmsg("plthook_open_executable unable to get executable path");
+        return PLTHOOK_FILE_NOT_FOUND;
+    }
+    struct link_map *lmap = create_link_map_fname(exe);
+    free(exe);
     if (lmap == NULL) {
         set_errmsg("create_link_map_fname unable to find executable");
         return PLTHOOK_INTERNAL_ERROR;
