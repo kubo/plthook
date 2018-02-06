@@ -95,11 +95,14 @@ Supported Platforms
 | Linux i386 and x86_64 | plthook_elf.c |
 | Linux arm, aarch64, powerpc and powerpc64le (*1) | plthook_elf.c |
 | Windows 32-bit and x64 (MSVC, Mingw32 and Cygwin) | plthook_win32.c |
-| macOS | plthook_osx.c
+| OS X 10.11 El Capitan or earlier(*2) | plthook_osx.c
 | Solaris x86_64 | plthook_elf.c |
 | FreeBSD i386 and x86_64 except i386 program on x86_64 OS | plthook_elf.c |
+| Android(*3) | plthook_elf.c |
 
 *1 These are tested on [QEMU][], which version must be 2.2 or later, user-mode emulation.
+*2 Unit tests fails on macOS Sierra in travis-ci. I have not checked the reason yet.
+*3 Contributed by @redmercury. I cannot check it by myself.
 
 [QEMU]: http://www.qemu.org/
 [ELF]: https://en.wikipedia.org/wiki/Executable_and_Linkable_Format
