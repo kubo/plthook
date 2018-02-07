@@ -16,6 +16,8 @@ or [IAT (Import Address Table)][IAT] entries in PE format used on Windows.
 Changes
 -------
 
+**2018-02-06:** Android support was contributed by [Daniel Deptford][].
+
 **2017-10-01:** `plthook_elf.c` was rewritten. Plthook had needed to
 read files on filesystem to get various information about target
 object files. It now do it only for full RELRO object files.
@@ -100,12 +102,13 @@ Supported Platforms
 | FreeBSD i386 and x86_64 except i386 program on x86_64 OS | plthook_elf.c |
 | Android(*3) | plthook_elf.c |
 
-*1 These are tested on [QEMU][], which version must be 2.2 or later, user-mode emulation.
-*2 Unit tests fails on macOS Sierra in travis-ci. I have not checked the reason yet.
-*3 Contributed by @redmercury. I cannot check it by myself.
+*1 These are tested on [QEMU][], which version must be 2.2 or later, user-mode emulation.  
+*2 Unit tests fails on macOS Sierra in travis-ci. I have not checked the reason yet.  
+*3 Contributed by [Daniel Deptford][].
 
 [QEMU]: http://www.qemu.org/
 [ELF]: https://en.wikipedia.org/wiki/Executable_and_Linkable_Format
+[Daniel Deptford]: https://github.com/redmercury
 
 License
 -------
