@@ -10,6 +10,16 @@ matrix:
       sudo: required
     - os: osx
       env: OS=osx
+      # macOS 10.12 Sierra
+      osx_image: xcode8.3
+    - os: osx
+      env: OS=osx
+      # macOS 10.11 El Capitan
+      osx_image: xcode7.3
+    - os: osx
+      env: OS=osx
+      # macOS 10.10 Yosemite
+      osx_image: xcode6.4
 language: c
 before_install:
   - if [[ "$OS" == "linux" ]]; then sudo apt-get update -qq; fi
