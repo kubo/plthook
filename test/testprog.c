@@ -56,6 +56,9 @@ static enum_test_data_t funcs_called_by_main[] = {
     {"ceil_cdecl", 0},
     {"ceil_stdcall", 0},
     {"ceil_fastcall", 0},
+#ifndef __CYGWIN__
+    {"libtest.dll:@10", 0},
+#endif
 #elif defined _WIN32 && defined __GNUC__
     {"ceil_cdecl", 0},
     {"ceil_stdcall@8", 0},
@@ -64,6 +67,7 @@ static enum_test_data_t funcs_called_by_main[] = {
     {"ceil_cdecl", 0},
     {"_ceil_stdcall@8", 0},
     {"@ceil_fastcall@8", 0},
+    {"libtest.dll:@10", 0},
 #elif defined __APPLE__
     {"_ceil_cdecl", 0},
 #else
@@ -83,10 +87,19 @@ static double ceil_fastcall_arg = 0.0;
 static double ceil_fastcall_result = 0.0;
 #endif
 
+#if defined _WIN32
+static double ceil_export_by_ordinal_arg = 0.0;
+static double ceil_export_by_ordinal_result = 0.0;
+#endif
+
 static double (*ceil_cdecl_old_func)(double);
 #if defined _WIN32 || defined __CYGWIN__
 static double (__stdcall *ceil_stdcall_old_func)(double);
 static double (__fastcall *ceil_fastcall_old_func)(double);
+#endif
+
+#if defined _WIN32
+static double (*ceil_export_by_ordinal_old_func)(double);
 #endif
 
 static double ceil_hook_func(double arg)
@@ -119,6 +132,16 @@ static double __fastcall ceil_fastcall_hook_func(double arg)
     double result = ceil_fastcall_old_func(arg);
     ceil_fastcall_arg = arg;
     ceil_fastcall_result = result;
+    return result;
+}
+#endif
+
+#if defined _WIN32
+static double ceil_export_by_ordinal_hook_func(double arg)
+{
+    double result = ceil_export_by_ordinal_old_func(arg);
+    ceil_export_by_ordinal_arg = arg;
+    ceil_export_by_ordinal_result = result;
     return result;
 }
 #endif
@@ -187,6 +210,9 @@ int main(int argc, char **argv)
     ceil_stdcall(arg);
     ceil_fastcall(arg);
 #endif
+#if defined _WIN32
+    ceil_export_by_ordinal(arg);
+#endif
     /* ensure that *_result and *_arg are not changed. */
     CHK_DBL_EQ(ceil_arg, 0.0);
     CHK_DBL_EQ(ceil_result, 0.0);
@@ -197,6 +223,10 @@ int main(int argc, char **argv)
     CHK_DBL_EQ(ceil_stdcall_result, 0.0);
     CHK_DBL_EQ(ceil_fastcall_arg, 0.0);
     CHK_DBL_EQ(ceil_fastcall_result, 0.0);
+#endif
+#if defined _WIN32
+    CHK_DBL_EQ(ceil_export_by_ordinal_arg, 0.0);
+    CHK_DBL_EQ(ceil_export_by_ordinal_result, 0.0);
 #endif
 
     switch (open_mode) {
@@ -218,6 +248,9 @@ int main(int argc, char **argv)
 #if defined _WIN32 || defined __CYGWIN__
     CHK_PH(plthook_replace(plthook, "ceil_stdcall", (void*)ceil_stdcall_hook_func, (void**)&ceil_stdcall_old_func));
     CHK_PH(plthook_replace(plthook, "ceil_fastcall", (void*)ceil_fastcall_hook_func, (void**)&ceil_fastcall_old_func));
+#endif
+#if defined _WIN32
+    CHK_PH(plthook_replace(plthook, "libtest.dll:@10", (void*)ceil_export_by_ordinal_hook_func, (void**)&ceil_export_by_ordinal_old_func));
 #endif
     plthook_close(plthook);
 
@@ -263,6 +296,16 @@ int main(int argc, char **argv)
     CHK_DBL_NEQ(result, 0.0);
     CHK_DBL_EQ(ceil_fastcall_arg, arg);
     CHK_DBL_EQ(ceil_fastcall_result, result);
+    CHK_DBL_EQ(ceil_result, result);
+    CHK_DBL_EQ(ceil_arg, arg);
+#endif
+
+#if defined _WIN32
+    arg = 10.7;
+    result = ceil_export_by_ordinal(arg);
+    CHK_DBL_NEQ(result, 0.0);
+    CHK_DBL_EQ(ceil_export_by_ordinal_arg, arg);
+    CHK_DBL_EQ(ceil_export_by_ordinal_result, result);
     CHK_DBL_EQ(ceil_result, result);
     CHK_DBL_EQ(ceil_arg, arg);
 #endif

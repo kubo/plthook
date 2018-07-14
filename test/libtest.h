@@ -20,6 +20,8 @@ double __stdcall ceil_stdcall(double x);
 
 LIBTESTAPI
 double __fastcall ceil_fastcall(double x);
+
+double ceil_export_by_ordinal(double x);
 #endif
 
 #endif

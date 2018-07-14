@@ -3,7 +3,7 @@
 all: libtest.dll testprog.exe
 
 libtest.dll: libtest.c libtest.h
-	cl /nologo /LD /MD /DLIBTEST_DLL /Felibtest.dll libtest.c
+	cl /nologo /LD /MD /DLIBTEST_DLL /Felibtest.dll libtest.c /link /def:libtest.def
 
 testprog.exe: testprog.c ../plthook_win32.c libtest.h
 	cl /nologo /MD /Fetestprog -I.. testprog.c ..\plthook_win32.c libtest.lib

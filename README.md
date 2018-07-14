@@ -68,6 +68,12 @@ Note that built-in functions cannot be hooked. For example the C
 compiler in macOS Sierra compiles `ceil()` as inline assembly code,
 not as function call of `ceil` in the system library.
 
+When a functions is imported by [ordinal][] on Windows,
+the function name is specified by `export_dll_name:@ordinal`.
+For example `api-ms-win-shcore-path-l1-1-0.dll:@170`.
+
+[ordinal]: https://msdn.microsoft.com/en-us/library/e7tsx612.aspx
+
 Another Usage
 -------------
 

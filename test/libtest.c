@@ -16,4 +16,9 @@ double __fastcall ceil_fastcall(double x)
 {
     return ceil(x);
 }
+
+double ceil_export_by_ordinal(double x)
+{
+    return ceil(x);
+}
 #endif
