@@ -708,15 +708,12 @@ static int plthook_open_real(plthook_t **plthook_out, struct link_map *lmap)
     }
 
 #ifdef SUPPORT_RELRO
-    dyn = find_dyn_by_tag(lmap->l_ld, DT_FLAGS_1);
-    if (dyn != NULL && (dyn->d_un.d_val & DF_1_NOW)) {
-        int rv = set_relro_members(&plthook, lmap);
-        if (rv != 0) {
-            return rv;
-        }
-        if (page_size == 0) {
-            page_size = sysconf(_SC_PAGESIZE);
-        }
+    int rv = set_relro_members(&plthook, lmap);
+    if (rv != 0) {
+        return rv;
+    }
+    if (page_size == 0) {
+        page_size = sysconf(_SC_PAGESIZE);
     }
 #endif
 
