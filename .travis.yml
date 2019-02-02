@@ -4,9 +4,9 @@ matrix:
       env: OS=linux
       sudo: required
     - os: linux
-      # Use QEMU 2.2 in ppa:wgrant/scalingstack-ppc64el.
+      # Use QEMU 2.8 in ppa:panfaust/qemu-backports
       env: OS=linux-cross CROSS=1
-      dist: trusty
+      dist: xenial
       sudo: required
     - os: osx
       env: OS=osx
@@ -24,8 +24,8 @@ language: c
 before_install:
   - if [[ "$OS" == "linux" ]]; then sudo apt-get update -qq; fi
   - if [[ "$OS" == "linux" ]]; then sudo apt-get install gcc-multilib libc6-dbg:i386 valgrind; fi
-  - if [[ "$OS" == "linux-cross" ]]; then sudo add-apt-repository ppa:wgrant/scalingstack-ppc64el -y; fi
+  - if [[ "$OS" == "linux-cross" ]]; then sudo add-apt-repository ppa:panfaust/qemu-backports -y; fi
   - if [[ "$OS" == "linux-cross" ]]; then sudo apt-get update -qq; fi
-  - if [[ "$OS" == "linux-cross" ]]; then sudo apt-get install qemu-user gcc-arm-linux-gnueabi gcc-arm-linux-gnueabihf gcc-aarch64-linux-gnu gcc-powerpc-linux-gnu gcc-powerpc64le-linux-gnu; fi
+  - if [[ "$OS" == "linux-cross" ]]; then sudo apt-get install qemu-user gcc-arm-linux-gnueabi gcc-arm-linux-gnueabihf gcc-aarch64-linux-gnu gcc-powerpc-linux-gnu gcc-powerpc64le-linux-gnu libc6-dev-armhf-cross libc6-dev-ppc64el-cross libc6-dev-powerpc-cross libc6-dev-armel-cross libc6-dev-arm64-cross; fi
 script:
   - cd test && make check CROSS=$CROSS
