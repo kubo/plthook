@@ -82,13 +82,17 @@
 #define USE_REL
 #elif defined __arm__ || defined __arm
 #define R_JUMP_SLOT   R_ARM_JUMP_SLOT
+#define R_GLOBAL_DATA R_ARM_GLOB_DAT
 #define USE_REL
 #elif defined __aarch64__ || defined __aarch64 /* ARM64 */
 #define R_JUMP_SLOT   R_AARCH64_JUMP_SLOT
+#define R_GLOBAL_DATA R_AARCH64_GLOB_DAT
 #elif defined __powerpc64__
 #define R_JUMP_SLOT   R_PPC64_JMP_SLOT
+#define R_GLOBAL_DATA R_PPC64_GLOB_DAT
 #elif defined __powerpc__
 #define R_JUMP_SLOT   R_PPC_JMP_SLOT
+#define R_GLOBAL_DATA R_PPC_GLOB_DAT
 #elif 0 /* disabled because not tested */ && (defined __sparcv9 || defined __sparc_v9__)
 #define R_JUMP_SLOT   R_SPARC_JMP_SLOT
 #elif 0 /* disabled because not tested */ && (defined __sparc || defined __sparc__)
@@ -179,7 +183,10 @@ struct plthook {
     const char *plt_addr_base;
     const Elf_Plt_Rel *rela_plt;
     size_t rela_plt_cnt;
-    Elf_Xword r_type;
+#ifdef R_GLOBAL_DATA
+    const Elf_Plt_Rel *rela_dyn;
+    size_t rela_dyn_cnt;
+#endif
 #ifdef SUPPORT_RELRO
     const char *relro_start;
     const char *relro_end;
@@ -615,9 +622,9 @@ static int plthook_open_real(plthook_t **plthook_out, struct link_map *lmap)
 #endif
 #elif defined __FreeBSD__ || defined __sun
     const Elf_Ehdr *ehdr = (const Elf_Ehdr*)lmap->l_addr;
-    int rv = check_elf_header(ehdr);
-    if (rv != 0) {
-        return rv;
+    int rv_ = check_elf_header(ehdr);
+    if (rv_ != 0) {
+        return rv_;
     }
     if (ehdr->e_type == ET_DYN) {
         dyn_addr_base = (const char*)lmap->l_addr;
@@ -664,33 +671,22 @@ static int plthook_open_real(plthook_t **plthook_out, struct link_map *lmap)
 
     /* get .rela.plt or .rel.plt section */
     dyn = find_dyn_by_tag(lmap->l_ld, DT_JMPREL);
-    plthook.r_type = R_JUMP_SLOT;
-#ifdef R_GLOBAL_DATA
-    if (dyn == NULL) {
-        /* get .rela.dyn or .rel.dyn section */
-        dyn = find_dyn_by_tag(lmap->l_ld, PLT_DT_REL);
-        plthook.r_type = R_GLOBAL_DATA;
-    }
-#endif
-    if (dyn == NULL) {
-        set_errmsg("failed to find DT_JMPREL");
-        return PLTHOOK_INTERNAL_ERROR;
-    }
-    plthook.rela_plt = (const Elf_Plt_Rel *)(dyn_addr_base + dyn->d_un.d_ptr);
-
-    if (plthook.r_type == R_JUMP_SLOT) {
-        /* get total size of .rela.plt or .rel.plt */
+    if (dyn != NULL) {
+        plthook.rela_plt = (const Elf_Plt_Rel *)(dyn_addr_base + dyn->d_un.d_ptr);
         dyn = find_dyn_by_tag(lmap->l_ld, DT_PLTRELSZ);
         if (dyn == NULL) {
             set_errmsg("failed to find DT_PLTRELSZ");
             return PLTHOOK_INTERNAL_ERROR;
         }
-
         plthook.rela_plt_cnt = dyn->d_un.d_val / sizeof(Elf_Plt_Rel);
+    }
 #ifdef R_GLOBAL_DATA
-    } else {
+    /* get .rela.dyn or .rel.dyn section */
+    dyn = find_dyn_by_tag(lmap->l_ld, PLT_DT_REL);
+    if (dyn != NULL) {
         size_t total_size, elem_size;
 
+        plthook.rela_dyn = (const Elf_Plt_Rel *)(dyn_addr_base + dyn->d_un.d_ptr);
         dyn = find_dyn_by_tag(lmap->l_ld, PLT_DT_RELSZ);
         if (dyn == NULL) {
             set_errmsg("failed to find PLT_DT_RELSZ");
@@ -704,9 +700,21 @@ static int plthook_open_real(plthook_t **plthook_out, struct link_map *lmap)
             return PLTHOOK_INTERNAL_ERROR;
         }
         elem_size = dyn->d_un.d_ptr;
-        plthook.rela_plt_cnt = total_size / elem_size;
-#endif
+        plthook.rela_dyn_cnt = total_size / elem_size;
     }
+#endif
+
+#ifdef R_GLOBAL_DATA
+    if (plthook.rela_plt == NULL && plthook.rela_dyn == NULL) {
+        set_errmsg("failed to find either of DT_JMPREL and DT_REL");
+        return PLTHOOK_INTERNAL_ERROR;
+    }
+#else
+    if (plthook.rela_plt == NULL) {
+        set_errmsg("failed to find DT_JMPREL");
+        return PLTHOOK_INTERNAL_ERROR;
+    }
+#endif
 
 #ifdef SUPPORT_RELRO
     dyn = find_dyn_by_tag(lmap->l_ld, DT_FLAGS_1);
@@ -793,25 +801,42 @@ static int check_elf_header(const Elf_Ehdr *ehdr)
     return 0;
 }
 
+static int check_rel(const plthook_t *plthook, const Elf_Plt_Rel *plt, Elf_Xword r_type, const char **name_out, void ***addr_out)
+{
+    if (ELF_R_TYPE(plt->r_info) == r_type) {
+        size_t idx = ELF_R_SYM(plt->r_info);
+        idx = plthook->dynsym[idx].st_name;
+        if (idx + 1 > plthook->dynstr_size) {
+            set_errmsg("too big section header string table index: %" SIZE_T_FMT, idx);
+            return PLTHOOK_INVALID_FILE_FORMAT;
+        }
+        *name_out = plthook->dynstr + idx;
+        *addr_out = (void**)(plthook->plt_addr_base + plt->r_offset);
+        return 0;
+    }
+    return -1;
+}
+
 int plthook_enum(plthook_t *plthook, unsigned int *pos, const char **name_out, void ***addr_out)
 {
     while (*pos < plthook->rela_plt_cnt) {
         const Elf_Plt_Rel *plt = plthook->rela_plt + *pos;
-        if (ELF_R_TYPE(plt->r_info) == plthook->r_type) {
-            size_t idx = ELF_R_SYM(plt->r_info);
-
-            idx = plthook->dynsym[idx].st_name;
-            if (idx + 1 > plthook->dynstr_size) {
-                set_errmsg("too big section header string table index: %" SIZE_T_FMT, idx);
-                return PLTHOOK_INVALID_FILE_FORMAT;
-            }
-            *name_out = plthook->dynstr + idx;
-            *addr_out = (void**)(plthook->plt_addr_base + plt->r_offset);
-            (*pos)++;
-            return 0;
-        }
+        int rv = check_rel(plthook, plt, R_JUMP_SLOT, name_out, addr_out);
         (*pos)++;
+        if (rv >= 0) {
+            return rv;
+        }
     }
+#ifdef R_GLOBAL_DATA
+    while (*pos < plthook->rela_plt_cnt + plthook->rela_dyn_cnt) {
+        const Elf_Plt_Rel *plt = plthook->rela_dyn + (*pos - plthook->rela_plt_cnt);
+        int rv = check_rel(plthook, plt, R_GLOBAL_DATA, name_out, addr_out);
+        (*pos)++;
+        if (rv >= 0) {
+            return rv;
+        }
+    }
+#endif
     *name_out = NULL;
     *addr_out = NULL;
     return EOF;
