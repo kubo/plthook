@@ -2,12 +2,32 @@ matrix:
   include:
     - os: linux
       env: OS=linux
-      sudo: required
+      addons:
+        apt:
+          packages:
+            - gcc-multilib
+            - libc6-dbg:i386
+            - valgrind
     - os: linux
       # Use QEMU 2.8 in ppa:panfaust/qemu-backports
       env: OS=linux-cross CROSS=1
       dist: xenial
-      sudo: required
+      addons:
+        apt:
+          sources:
+            - sourceline: 'ppa:panfaust/qemu-backports'
+          packages:
+            - qemu-user
+            - gcc-arm-linux-gnueabi
+            - gcc-arm-linux-gnueabihf
+            - gcc-aarch64-linux-gnu
+            - gcc-powerpc-linux-gnu
+            - gcc-powerpc64le-linux-gnu
+            - libc6-dev-armhf-cross
+            - libc6-dev-ppc64el-cross
+            - libc6-dev-powerpc-cross
+            - libc6-dev-armel-cross
+            - libc6-dev-arm64-cross
     - os: osx
       env: OS=osx
       # macOS 10.12 Sierra
@@ -21,11 +41,5 @@ matrix:
       # macOS 10.10 Yosemite
       osx_image: xcode6.4
 language: c
-before_install:
-  - if [[ "$OS" == "linux" ]]; then sudo apt-get update -qq; fi
-  - if [[ "$OS" == "linux" ]]; then sudo apt-get install gcc-multilib libc6-dbg:i386 valgrind; fi
-  - if [[ "$OS" == "linux-cross" ]]; then sudo add-apt-repository ppa:panfaust/qemu-backports -y; fi
-  - if [[ "$OS" == "linux-cross" ]]; then sudo apt-get update -qq; fi
-  - if [[ "$OS" == "linux-cross" ]]; then sudo apt-get install qemu-user gcc-arm-linux-gnueabi gcc-arm-linux-gnueabihf gcc-aarch64-linux-gnu gcc-powerpc-linux-gnu gcc-powerpc64le-linux-gnu libc6-dev-armhf-cross libc6-dev-ppc64el-cross libc6-dev-powerpc-cross libc6-dev-armel-cross libc6-dev-arm64-cross; fi
 script:
   - cd test && make check CROSS=$CROSS
