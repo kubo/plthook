@@ -75,37 +75,40 @@
 
 #if defined __x86_64__ || defined __x86_64
 #define R_JUMP_SLOT   R_X86_64_JUMP_SLOT
-#define Elf_Plt_Rel   Elf_Rela
-#define PLT_DT_REL    DT_RELA
 #define R_GLOBAL_DATA R_X86_64_GLOB_DAT
 #elif defined __i386__ || defined __i386
 #define R_JUMP_SLOT   R_386_JMP_SLOT
-#define Elf_Plt_Rel   Elf_Rel
-#define PLT_DT_REL    DT_REL
 #define R_GLOBAL_DATA R_386_GLOB_DAT
+#define USE_REL
 #elif defined __arm__ || defined __arm
 #define R_JUMP_SLOT   R_ARM_JUMP_SLOT
-#define Elf_Plt_Rel   Elf_Rel
+#define USE_REL
 #elif defined __aarch64__ || defined __aarch64 /* ARM64 */
 #define R_JUMP_SLOT   R_AARCH64_JUMP_SLOT
-#define Elf_Plt_Rel   Elf_Rela
 #elif defined __powerpc64__
 #define R_JUMP_SLOT   R_PPC64_JMP_SLOT
-#define Elf_Plt_Rel   Elf_Rela
 #elif defined __powerpc__
 #define R_JUMP_SLOT   R_PPC_JMP_SLOT
-#define Elf_Plt_Rel   Elf_Rela
 #elif 0 /* disabled because not tested */ && (defined __sparcv9 || defined __sparc_v9__)
 #define R_JUMP_SLOT   R_SPARC_JMP_SLOT
-#define Elf_Plt_Rel   Elf_Rela
 #elif 0 /* disabled because not tested */ && (defined __sparc || defined __sparc__)
 #define R_JUMP_SLOT   R_SPARC_JMP_SLOT
-#define Elf_Plt_Rel   Elf_Rela
 #elif 0 /* disabled because not tested */ && (defined __ia64 || defined __ia64__)
 #define R_JUMP_SLOT   R_IA64_IPLTMSB
-#define Elf_Plt_Rel   Elf_Rela
 #else
 #error unsupported OS
+#endif
+
+#ifdef USE_REL
+#define Elf_Plt_Rel   Elf_Rel
+#define PLT_DT_REL    DT_REL
+#define PLT_DT_RELSZ  DT_RELSZ
+#define PLT_DT_RELENT DT_RELENT
+#else
+#define Elf_Plt_Rel   Elf_Rela
+#define PLT_DT_REL    DT_RELA
+#define PLT_DT_RELSZ  DT_RELASZ
+#define PLT_DT_RELENT DT_RELAENT
 #endif
 
 #if defined __LP64__
@@ -174,8 +177,8 @@ struct plthook {
     const char *dynstr;
     size_t dynstr_size;
     const char *plt_addr_base;
-    const Elf_Plt_Rel *plt;
-    size_t plt_cnt;
+    const Elf_Plt_Rel *rela_plt;
+    size_t rela_plt_cnt;
     Elf_Xword r_type;
 #ifdef SUPPORT_RELRO
     const char *relro_start;
@@ -662,7 +665,7 @@ static int plthook_open_real(plthook_t **plthook_out, struct link_map *lmap)
     /* get .rela.plt or .rel.plt section */
     dyn = find_dyn_by_tag(lmap->l_ld, DT_JMPREL);
     plthook.r_type = R_JUMP_SLOT;
-#ifdef PLT_DT_REL
+#ifdef R_GLOBAL_DATA
     if (dyn == NULL) {
         /* get .rela.dyn or .rel.dyn section */
         dyn = find_dyn_by_tag(lmap->l_ld, PLT_DT_REL);
@@ -673,7 +676,7 @@ static int plthook_open_real(plthook_t **plthook_out, struct link_map *lmap)
         set_errmsg("failed to find DT_JMPREL");
         return PLTHOOK_INTERNAL_ERROR;
     }
-    plthook.plt = (const Elf_Plt_Rel *)(dyn_addr_base + dyn->d_un.d_ptr);
+    plthook.rela_plt = (const Elf_Plt_Rel *)(dyn_addr_base + dyn->d_un.d_ptr);
 
     if (plthook.r_type == R_JUMP_SLOT) {
         /* get total size of .rela.plt or .rel.plt */
@@ -683,27 +686,25 @@ static int plthook_open_real(plthook_t **plthook_out, struct link_map *lmap)
             return PLTHOOK_INTERNAL_ERROR;
         }
 
-        plthook.plt_cnt = dyn->d_un.d_val / sizeof(Elf_Plt_Rel);
-#ifdef PLT_DT_REL
+        plthook.rela_plt_cnt = dyn->d_un.d_val / sizeof(Elf_Plt_Rel);
+#ifdef R_GLOBAL_DATA
     } else {
-        int total_size_tag = PLT_DT_REL == DT_RELA ? DT_RELASZ : DT_RELSZ;
-        int elem_size_tag = PLT_DT_REL == DT_RELA ? DT_RELAENT : DT_RELENT;
         size_t total_size, elem_size;
 
-        dyn = find_dyn_by_tag(lmap->l_ld, total_size_tag);
+        dyn = find_dyn_by_tag(lmap->l_ld, PLT_DT_RELSZ);
         if (dyn == NULL) {
-            set_errmsg("failed to find 0x%x", total_size_tag);
+            set_errmsg("failed to find PLT_DT_RELSZ");
             return PLTHOOK_INTERNAL_ERROR;
         }
         total_size = dyn->d_un.d_ptr;
 
-        dyn = find_dyn_by_tag(lmap->l_ld, elem_size_tag);
+        dyn = find_dyn_by_tag(lmap->l_ld, PLT_DT_RELENT);
         if (dyn == NULL) {
-            set_errmsg("failed to find 0x%x", elem_size_tag);
+            set_errmsg("failed to find PLT_DT_RELENT");
             return PLTHOOK_INTERNAL_ERROR;
         }
         elem_size = dyn->d_un.d_ptr;
-        plthook.plt_cnt = total_size / elem_size;
+        plthook.rela_plt_cnt = total_size / elem_size;
 #endif
     }
 
@@ -794,8 +795,8 @@ static int check_elf_header(const Elf_Ehdr *ehdr)
 
 int plthook_enum(plthook_t *plthook, unsigned int *pos, const char **name_out, void ***addr_out)
 {
-    while (*pos < plthook->plt_cnt) {
-        const Elf_Plt_Rel *plt = plthook->plt + *pos;
+    while (*pos < plthook->rela_plt_cnt) {
+        const Elf_Plt_Rel *plt = plthook->rela_plt + *pos;
         if (ELF_R_TYPE(plt->r_info) == plthook->r_type) {
             size_t idx = ELF_R_SYM(plt->r_info);
 
