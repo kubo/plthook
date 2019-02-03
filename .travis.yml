@@ -1,12 +1,16 @@
 matrix:
   include:
     - os: linux
-      env: OS=linux
+      env: OS=linux MATRIX_EVAL=CC=gcc-8
       addons:
         apt:
+          sources:
+            - ubuntu-toolchain-r-test
           packages:
-            - gcc-multilib
+            - gcc-8
+            - gcc-8-multilib
             - libc6-dbg:i386
+            - linux-libc-dev:i386
             - valgrind
     - os: linux
       # Use QEMU 2.8 in ppa:panfaust/qemu-backports
@@ -41,5 +45,7 @@ matrix:
       # macOS 10.10 Yosemite
       osx_image: xcode6.4
 language: c
+before_install:
+  - eval "${MATRIX_EVAL}"
 script:
   - cd test && make check CROSS=$CROSS
