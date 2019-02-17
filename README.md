@@ -16,6 +16,9 @@ or [IAT (Import Address Table)][IAT] entries in PE format used on Windows.
 Changes
 -------
 
+**2019-02-17:** Support `plthook_open_by_address()` and change
+internal logic of `plthook_open()` on Android.
+
 **2019-02-17:** Stop checking RELRO and check memory protection at
 runtime instead.
 

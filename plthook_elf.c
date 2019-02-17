@@ -6,7 +6,7 @@
  *
  * ------------------------------------------------------
  *
- * Copyright 2013-2016 Kubo Takehiro <kubo@jiubao.org>
+ * Copyright 2013-2019 Kubo Takehiro <kubo@jiubao.org>
  *
  * Redistribution and use in source and binary forms, with or without modification, are
  * permitted provided that the following conditions are met:
@@ -122,7 +122,11 @@
 #endif
 #define SIZE_T_FMT "lu"
 #define ELF_WORD_FMT "u"
+#ifdef __ANDROID__
+#define ELF_XWORD_FMT "llu"
+#else
 #define ELF_XWORD_FMT "lu"
+#endif
 #define ELF_SXWORD_FMT "ld"
 #define Elf_Half Elf64_Half
 #define Elf_Xword Elf64_Xword
@@ -181,9 +185,6 @@ struct plthook {
     const Elf_Plt_Rel *rela_dyn;
     size_t rela_dyn_cnt;
 #endif
-#if defined __ANDROID__
-    struct link_map *created_lmap;
-#endif
 };
 
 static char errmsg[512];
@@ -194,130 +195,41 @@ static int plthook_open_executable(plthook_t **plthook_out);
 static int plthook_open_shared_library(plthook_t **plthook_out, const char *filename);
 static const Elf_Dyn *find_dyn_by_tag(const Elf_Dyn *dyn, Elf_Sxword tag);
 static int plthook_open_real(plthook_t **plthook_out, struct link_map *lmap);
-#if defined __ANDROID__
-static int plthook_open_owned(plthook_t **plthook_out, struct link_map *lmap);
-#endif
 #if defined __FreeBSD__ || defined __sun
 static int check_elf_header(const Elf_Ehdr *ehdr);
 #endif
 static void set_errmsg(const char *fmt, ...) __attribute__((__format__ (__printf__, 1, 2)));
 
 #if defined __ANDROID__
-static char* get_executable() {
-    ssize_t size = 0;
-    ssize_t bufsize = 8;
-    char* linkname = NULL;
-
-    while(1) {
-        linkname = realloc(linkname, bufsize);
-        size = readlink("/proc/self/exe", linkname, bufsize);
-        if(size == -1) {
-            free(linkname);
-            return NULL;
-        }
-        if(size + 1 < bufsize) {
-            break;
-        }
-        bufsize *= 2;
-    }
-
-    linkname[size] = 0;
-    return linkname;
-}
-
-struct dh_iter {
-    const char* fname;
+struct dl_iterate_data {
     char* addr;
-    struct link_map* lmap;
+    struct link_map lmap;
 };
 
-static int dl_iterate_cb(struct dl_phdr_info *info, size_t size, void *data) {
-    ElfW(Half) phdr_idx = 0;
+static int dl_iterate_cb(struct dl_phdr_info *info, size_t size, void *cb_data)
+{
+    struct dl_iterate_data *data = (struct dl_iterate_data*)cb_data;
+    Elf_Half idx = 0;
 
-    if (info->dlpi_name == NULL) {
+    for (idx = 0; idx < info->dlpi_phnum; ++idx) {
+        const Elf_Phdr *phdr = &info->dlpi_phdr[idx];
+        char* base = (char*)info->dlpi_addr + phdr->p_vaddr;
+        if (base <= data->addr && data->addr < base + phdr->p_memsz) {
+            break;
+        }
+    }
+    if (idx == info->dlpi_phnum) {
         return 0;
     }
-
-    struct dh_iter* iter = (struct dh_iter*)data;
-
-    const char* dlpi_name_abs = strrchr(info->dlpi_name, '/');
-    if (dlpi_name_abs != NULL) {
-        dlpi_name_abs++;
-    } else {
-        dlpi_name_abs = info->dlpi_name;
-    }
-
-    int match = 0;
-    if (iter->fname) {
-        match = strcmp(info->dlpi_name, iter->fname) == 0 || (strcmp(dlpi_name_abs, iter->fname) == 0);
-    } else {
-        for (phdr_idx = 0; !match && phdr_idx < info->dlpi_phnum; ++phdr_idx) {
-            const Elf_Phdr *phdr = &info->dlpi_phdr[phdr_idx];
-            char* base = (char*)info->dlpi_addr + phdr->p_vaddr;
-            if (base <= iter->addr && base + phdr->p_memsz > iter->addr) {
-                match = 1;
-            }
+    for (idx = 0; idx < info->dlpi_phnum; ++idx) {
+        const Elf_Phdr *phdr = &info->dlpi_phdr[idx];
+        if (phdr->p_type == PT_DYNAMIC) {
+            data->lmap.l_addr = info->dlpi_addr;
+            data->lmap.l_ld = (Elf_Dyn*)(info->dlpi_addr + phdr->p_vaddr);
+            return 1;
         }
-    }
-
-    if (match) {
-        struct link_map* prev = NULL;
-
-      for (phdr_idx = 0; phdr_idx < info->dlpi_phnum; ++phdr_idx) {
-          const Elf_Phdr *phdr = &info->dlpi_phdr[phdr_idx];
-          if (phdr->p_type == PT_DYNAMIC) {
-              struct link_map* lmap = malloc(sizeof(struct link_map));
-              lmap->l_addr = info->dlpi_addr;
-              lmap->l_name = strdup(dlpi_name_abs);
-              lmap->l_ld = (Elf_Dyn*)(info->dlpi_addr + phdr->p_vaddr);
-              lmap->l_next = NULL;
-              lmap->l_prev = prev;
-              if (prev != NULL) {
-                  prev->l_next = lmap;
-              }
-              prev = lmap;
-              if (iter->lmap == NULL) {
-                  iter->lmap = lmap;
-              }
-            }
-        }
-        return 1;
     }
     return 0;
-}
-
-static struct link_map* create_link_map_fname(const char* fname)
-{
-    struct dh_iter iter;
-    iter.fname = fname;
-    iter.addr = NULL;
-    iter.lmap = NULL;
-
-    dl_iterate_phdr(dl_iterate_cb, &iter);
-
-    return iter.lmap;
-}
-
-static struct link_map* create_link_map_addr(void* addr)
-{
-    struct dh_iter iter;
-    iter.fname = NULL;
-    iter.addr = (char*)addr;
-    iter.lmap = NULL;
-
-    dl_iterate_phdr(dl_iterate_cb, &iter);
-
-    return iter.lmap;
-}
-
-static void delete_link_map(struct link_map* lmap)
-{
-    while(lmap) {
-      struct link_map* next = lmap->l_next;
-      free(lmap->l_name);
-      free(lmap);
-      lmap = next;
-  }
 }
 #endif
 
@@ -334,7 +246,17 @@ int plthook_open(plthook_t **plthook_out, const char *filename)
 int plthook_open_by_handle(plthook_t **plthook_out, void *hndl)
 {
 #if defined __ANDROID__
-    return PLTHOOK_NOT_IMPLEMENTED;
+    char *addr;
+
+    if (hndl == NULL) {
+        set_errmsg("NULL handle");
+        return PLTHOOK_FILE_NOT_FOUND;
+    }
+    addr = dlsym(hndl, "__INIT_ARRAY__");
+    if (addr == NULL) {
+        addr = dlsym(hndl, "_end");
+    }
+    return plthook_open_by_address(plthook_out, addr - 1);
 #else
     struct link_map *lmap = NULL;
 
@@ -355,12 +277,14 @@ int plthook_open_by_address(plthook_t **plthook_out, void *address)
 #if defined __FreeBSD__
     return PLTHOOK_NOT_IMPLEMENTED;
 #elif defined __ANDROID__
-    struct link_map *lmap = create_link_map_addr(address);
-    if (lmap == NULL) {
-        set_errmsg("create_link_map_addr unable to find address");
+    struct dl_iterate_data data = {0,};
+    data.addr = address;
+    dl_iterate_phdr(dl_iterate_cb, &data);
+    if (data.lmap.l_ld == NULL) {
+        set_errmsg("Could not find memory region containing address %p", address);
         return PLTHOOK_INTERNAL_ERROR;
     }
-    return plthook_open_owned(plthook_out, lmap);
+    return plthook_open_real(plthook_out, &data.lmap);
 #else
     Dl_info info;
     struct link_map *lmap = NULL;
@@ -376,23 +300,10 @@ int plthook_open_by_address(plthook_t **plthook_out, void *address)
 
 static int plthook_open_executable(plthook_t **plthook_out)
 {
-#if defined __linux__
 #if defined __ANDROID__
-    char* exe = get_executable();
-    if (!exe) {
-        set_errmsg("plthook_open_executable unable to get executable path");
-        return PLTHOOK_FILE_NOT_FOUND;
-    }
-    struct link_map *lmap = create_link_map_fname(exe);
-    free(exe);
-    if (lmap == NULL) {
-        set_errmsg("create_link_map_fname unable to find executable");
-        return PLTHOOK_INTERNAL_ERROR;
-    }
-    return plthook_open_owned(plthook_out, lmap);
-#else
+    return plthook_open_shared_library(plthook_out, NULL);
+#elif defined __linux__
     return plthook_open_real(plthook_out, _r_debug.r_map);
-#endif
 #elif defined __sun
     const char *auxv_file = "/proc/self/auxv";
 #define NUM_AUXV_CNT 10
@@ -428,21 +339,20 @@ static int plthook_open_executable(plthook_t **plthook_out)
 static int plthook_open_shared_library(plthook_t **plthook_out, const char *filename)
 {
     void *hndl = dlopen(filename, RTLD_LAZY | RTLD_NOLOAD);
+#ifdef __ANDROID__
+    int rv;
+#else
     struct link_map *lmap = NULL;
+#endif
 
     if (hndl == NULL) {
         set_errmsg("dlopen error: %s", dlerror());
         return PLTHOOK_FILE_NOT_FOUND;
     }
 #ifdef __ANDROID__
-    lmap = create_link_map_fname(filename);
-    if (lmap == NULL) {
-        set_errmsg("create_link_map_fname error");
-        dlclose(hndl);
-        return PLTHOOK_FILE_NOT_FOUND;
-    }
+    rv = plthook_open_by_handle(plthook_out, hndl);
     dlclose(hndl);
-    return plthook_open_owned(plthook_out, lmap);
+    return rv;
 #else
     if (dlinfo(hndl, RTLD_DI_LINKMAP, &lmap) != 0) {
         set_errmsg("dlinfo error");
@@ -722,22 +632,6 @@ static int plthook_open_real(plthook_t **plthook_out, struct link_map *lmap)
     return 0;
 }
 
-#if defined __ANDROID__
-static int plthook_open_owned(plthook_t **plthook_out, struct link_map *lmap)
-{
-    plthook_t* plthook = NULL;
-    int result = plthook_open_real(&plthook, lmap);
-    if (result != PLTHOOK_SUCCESS) {
-        delete_link_map(lmap);
-    } else {
-        plthook->created_lmap = lmap;
-    }
-    *plthook_out = plthook;
-    return result;
-}
-#endif
-
-
 #if defined __FreeBSD__ || defined __sun
 static int check_elf_header(const Elf_Ehdr *ehdr)
 {
@@ -875,11 +769,6 @@ int plthook_replace(plthook_t *plthook, const char *funcname, void *funcaddr, vo
 void plthook_close(plthook_t *plthook)
 {
     if (plthook != NULL) {
-#if defined __ANDROID__
-        if (plthook->created_lmap != NULL) {
-            delete_link_map(plthook->created_lmap);
-        }
-#endif
         free(plthook);
     }
 }
