@@ -50,6 +50,7 @@
 #include <dlfcn.h>
 #ifdef __sun
 #include <sys/auxv.h>
+#include <procfs.h>
 #define ELF_TARGET_ALL
 #endif /* __sun */
 #ifdef __FreeBSD__
@@ -169,13 +170,6 @@
 #endif
 #endif /* __LP64__ */
 
-#if defined(PT_GNU_RELRO) && !defined(__sun) && !defined(__ANDROID__)
-#define SUPPORT_RELRO /* RELRO (RELocation Read-Only) */
-#if !defined(DF_1_NOW) && defined(DF_1_BIND_NOW)
-#define DF_1_NOW DF_1_BIND_NOW
-#endif
-#endif
-
 struct plthook {
     const Elf_Sym *dynsym;
     const char *dynstr;
@@ -187,32 +181,25 @@ struct plthook {
     const Elf_Plt_Rel *rela_dyn;
     size_t rela_dyn_cnt;
 #endif
-#ifdef SUPPORT_RELRO
-    const char *relro_start;
-    const char *relro_end;
-#endif
 #if defined __ANDROID__
     struct link_map *created_lmap;
 #endif
 };
 
 static char errmsg[512];
-
-#ifdef SUPPORT_RELRO
 static size_t page_size;
-#endif
+#define ALIGN_ADDR(addr) ((void*)((size_t)(addr) & ~(page_size - 1)))
 
 static int plthook_open_executable(plthook_t **plthook_out);
 static int plthook_open_shared_library(plthook_t **plthook_out, const char *filename);
 static const Elf_Dyn *find_dyn_by_tag(const Elf_Dyn *dyn, Elf_Sxword tag);
-#ifdef SUPPORT_RELRO
-static int set_relro_members(plthook_t *plthook, struct link_map *lmap);
-#endif
 static int plthook_open_real(plthook_t **plthook_out, struct link_map *lmap);
 #if defined __ANDROID__
 static int plthook_open_owned(plthook_t **plthook_out, struct link_map *lmap);
 #endif
+#if defined __FreeBSD__ || defined __sun
 static int check_elf_header(const Elf_Ehdr *ehdr);
+#endif
 static void set_errmsg(const char *fmt, ...) __attribute__((__format__ (__printf__, 1, 2)));
 
 #if defined __ANDROID__
@@ -478,47 +465,62 @@ static const Elf_Dyn *find_dyn_by_tag(const Elf_Dyn *dyn, Elf_Sxword tag)
     return NULL;
 }
 
-#ifdef SUPPORT_RELRO
-#if defined __linux__
-static const char *get_mapped_file(const void *address, char *buf, int *err)
+#ifdef __linux__
+static int get_memory_permission(void *address)
 {
     unsigned long addr = (unsigned long)address;
     FILE *fp;
+    char buf[PATH_MAX];
+    char perms[5];
 
     fp = fopen("/proc/self/maps", "r");
     if (fp == NULL) {
         set_errmsg("failed to open /proc/self/maps");
-        *err = PLTHOOK_INTERNAL_ERROR;
-        return NULL;
+        return 0;
     }
     while (fgets(buf, PATH_MAX, fp) != NULL) {
         unsigned long start, end;
-        int offset = 0;
 
-        sscanf(buf, "%lx-%lx %*s %*x %*x:%*x %*u %n", &start, &end, &offset);
-        if (offset == 0) {
+        if (sscanf(buf, "%lx-%lx %4s", &start, &end, perms) != 3) {
             continue;
         }
-        if (start < addr && addr < end) {
-            char *p = buf + offset;
-            while (*p == ' ') {
-                p++;
-            }
-            if (*p != '/') {
-                continue;
-            }
-            p[strlen(p) - 1] = '\0'; /* remove '\n' */
+        if (start <= addr && addr < end) {
+            int prot = 0;
             fclose(fp);
-            return p;
+            if (perms[0] == 'r') {
+                prot |= PROT_READ;
+            } else if (perms[0] != '-') {
+                goto unknown_perms;
+            }
+            if (perms[1] == 'w') {
+                prot |= PROT_WRITE;
+            } else if (perms[1] != '-') {
+                goto unknown_perms;
+            }
+            if (perms[2] == 'x') {
+                prot |= PROT_EXEC;
+            } else if (perms[2] != '-') {
+                goto unknown_perms;
+            }
+            if (perms[3] != 'p') {
+                goto unknown_perms;
+            }
+            if (perms[4] != '\0') {
+                perms[4] = '\0';
+                goto unknown_perms;
+            }
+            return prot;
         }
     }
     fclose(fp);
-    set_errmsg("Could not find a mapped file reagion containing %p", address);
-    *err = PLTHOOK_INTERNAL_ERROR;
-    return NULL;
+    set_errmsg("Could not find memory region containing %p", (void*)addr);
+    return 0;
+unknown_perms:
+    set_errmsg("Unexcepted memory permission %s at %p", perms, (void*)addr);
+    return 0;
 }
 #elif defined __FreeBSD__
-static const char *get_mapped_file(const void *address, char *buf, int *err)
+static int get_memory_permission(void *address)
 {
     uint64_t addr = (uint64_t)address;
     struct kinfo_vmentry *top;
@@ -526,87 +528,78 @@ static const char *get_mapped_file(const void *address, char *buf, int *err)
 
     top = kinfo_getvmmap(getpid(), &cnt);
     if (top == NULL) {
-        fprintf(stderr, "failed to call kinfo_getvmmap()\n");
-        *err = PLTHOOK_INTERNAL_ERROR;
-        return NULL;
+         set_errmsg("failed to call kinfo_getvmmap()\n");
+         return 0;
     }
     for (i = 0; i < cnt; i++) {
         struct kinfo_vmentry *kve = top + i;
 
-        if (kve->kve_start < addr && addr < kve->kve_end) {
-            strncpy(buf, kve->kve_path, PATH_MAX);
+        if (kve->kve_start <= addr && addr < kve->kve_end) {
+            int prot = 0;
+            if (kve->kve_protection & KVME_PROT_READ) {
+                prot |= PROT_READ;
+            }
+            if (kve->kve_protection & KVME_PROT_WRITE) {
+                prot |= PROT_WRITE;
+            }
+            if (kve->kve_protection & KVME_PROT_EXEC) {
+                prot |= PROT_EXEC;
+            }
+            if (prot == 0) {
+                set_errmsg("Unknown kve_protection 0x%x at %p", kve->kve_protection, (void*)addr);
+            }
             free(top);
-            return buf;
+            return prot;
         }
     }
     free(top);
-    set_errmsg("Could not find a mapped file reagion containing %p", address);
-    *err = PLTHOOK_INTERNAL_ERROR;
-    return NULL;
+    set_errmsg("Could not find memory region containing %p", (void*)addr);
+    return 0;
 }
-#else
-static const char *get_mapped_file(const void *address, char *buf, int *err)
+#elif defined(__sun)
+#define NUM_MAPS 20
+static int get_memory_permission(void *address)
 {
-    set_errmsg("Could not find a mapped file reagion containing %p", address);
-    *err = PLTHOOK_INTERNAL_ERROR;
-    return NULL;
-}
-#endif
-
-static int set_relro_members(plthook_t *plthook, struct link_map *lmap)
-{
-    char fnamebuf[PATH_MAX];
-    const char *fname;
+    unsigned long addr = (unsigned long)address;
     FILE *fp;
-    Elf_Ehdr ehdr;
-    Elf_Half idx;
-    int rv;
+    prmap_t maps[NUM_MAPS];
+    size_t num;
 
-    if (lmap->l_name[0] == '/') {
-        fname = lmap->l_name;
-    } else {
-        int err;
-
-        fname = get_mapped_file(plthook->dynstr, fnamebuf, &err);
-        if (fname == NULL) {
-            return err;
-        }
-    }
-    fp = fopen(fname, "r");
+    fp = fopen("/proc/self/map", "r");
     if (fp == NULL) {
-        set_errmsg("failed to open %s", fname);
-        return PLTHOOK_INTERNAL_ERROR;
+        set_errmsg("failed to open /proc/self/map");
+        return 0;
     }
-    if (fread(&ehdr, sizeof(ehdr), 1, fp) != 1) {
-        set_errmsg("failed to read the ELF header.");
-        fclose(fp);
-        return PLTHOOK_INVALID_FILE_FORMAT;
-    }
-    rv = check_elf_header(&ehdr);
-    if (rv != 0) {
-        fclose(fp);
-        return rv;
-    }
+    while ((num = fread(maps, sizeof(prmap_t), NUM_MAPS, fp)) > 0) {
+        size_t i;
+        for (i = 0; i < num; i++) {
+            prmap_t *map = &maps[i];
 
-    fseek(fp, ehdr.e_phoff, SEEK_SET);
-
-    for (idx = 0; idx < ehdr.e_phnum; idx++) {
-        Elf_Phdr phdr;
-
-        if (fread(&phdr, sizeof(phdr), 1, fp) != 1) {
-            set_errmsg("failed to read the program header table.");
-            fclose(fp);
-            return PLTHOOK_INVALID_FILE_FORMAT;
-        }
-        if (phdr.p_type == PT_GNU_RELRO) {
-            plthook->relro_start = plthook->plt_addr_base + phdr.p_vaddr;
-            plthook->relro_end = plthook->relro_start + phdr.p_memsz;
-            break;
+            if (map->pr_vaddr <= addr && addr < map->pr_vaddr + map->pr_size) {
+                int prot = 0;
+                if (map->pr_mflags & MA_READ) {
+                    prot |= PROT_READ;
+                }
+                if (map->pr_mflags & MA_WRITE) {
+                    prot |= PROT_WRITE;
+                }
+                if (map->pr_mflags & MA_EXEC) {
+                    prot |= PROT_EXEC;
+                }
+                if (prot == 0) {
+                    set_errmsg("Unknown pr_mflags 0x%x at %p", map->pr_mflags, (void*)addr);
+                }
+                fclose(fp);
+                return prot;
+            }
         }
     }
     fclose(fp);
+    set_errmsg("Could not find memory region containing %p", (void*)addr);
     return 0;
 }
+#else
+#error Unsupported platform
 #endif
 
 static int plthook_open_real(plthook_t **plthook_out, struct link_map *lmap)
@@ -614,6 +607,10 @@ static int plthook_open_real(plthook_t **plthook_out, struct link_map *lmap)
     plthook_t plthook = {NULL,};
     const Elf_Dyn *dyn;
     const char *dyn_addr_base = NULL;
+
+    if (page_size == 0) {
+        page_size = sysconf(_SC_PAGESIZE);
+    }
 
 #if defined __linux__
     plthook.plt_addr_base = (char*)lmap->l_addr;
@@ -716,16 +713,6 @@ static int plthook_open_real(plthook_t **plthook_out, struct link_map *lmap)
     }
 #endif
 
-#ifdef SUPPORT_RELRO
-    int rv = set_relro_members(&plthook, lmap);
-    if (rv != 0) {
-        return rv;
-    }
-    if (page_size == 0) {
-        page_size = sysconf(_SC_PAGESIZE);
-    }
-#endif
-
     *plthook_out = malloc(sizeof(plthook_t));
     if (*plthook_out == NULL) {
         set_errmsg("failed to allocate memory: %" SIZE_T_FMT " bytes", sizeof(plthook_t));
@@ -751,6 +738,7 @@ static int plthook_open_owned(plthook_t **plthook_out, struct link_map *lmap)
 #endif
 
 
+#if defined __FreeBSD__ || defined __sun
 static int check_elf_header(const Elf_Ehdr *ehdr)
 {
     static const unsigned short s = 1;
@@ -797,6 +785,7 @@ static int check_elf_header(const Elf_Ehdr *ehdr)
     }
     return 0;
 }
+#endif
 
 static int check_rel(const plthook_t *plthook, const Elf_Plt_Rel *plt, Elf_Xword r_type, const char **name_out, void ***addr_out)
 {
@@ -854,26 +843,24 @@ int plthook_replace(plthook_t *plthook, const char *funcname, void *funcaddr, vo
     while ((rv = plthook_enum(plthook, &pos, &name, &addr)) == 0) {
         if (strncmp(name, funcname, funcnamelen) == 0) {
             if (name[funcnamelen] == '\0' || name[funcnamelen] == '@') {
-#ifdef SUPPORT_RELRO
-                void *maddr = NULL;
-                if (plthook->relro_start <= (char*)addr && (char*)addr < plthook->relro_end) {
-                    maddr = (void*)((size_t)addr & ~(page_size - 1));
-                    if (mprotect(maddr, page_size, PROT_READ | PROT_WRITE) != 0) {
-                        set_errmsg("Could not change the process memory protection at %p: %s",
-                                   maddr, strerror(errno));
+                int prot = get_memory_permission(addr);
+                if (prot == 0) {
+                    return PLTHOOK_INTERNAL_ERROR;
+                }
+                if (!(prot & PROT_WRITE)) {
+                    if (mprotect(ALIGN_ADDR(addr), page_size, PROT_READ | PROT_WRITE) != 0) {
+                        set_errmsg("Could not change the process memory permission at %p: %s",
+                                   ALIGN_ADDR(addr), strerror(errno));
                         return PLTHOOK_INTERNAL_ERROR;
                     }
                 }
-#endif
                 if (oldfunc) {
                     *oldfunc = *addr;
                 }
                 *addr = funcaddr;
-#ifdef SUPPORT_RELRO
-                if (maddr != NULL) {
-                    mprotect(maddr, page_size, PROT_READ);
+                if (!(prot & PROT_WRITE)) {
+                    mprotect(ALIGN_ADDR(addr), page_size, prot);
                 }
-#endif
                 return 0;
             }
         }

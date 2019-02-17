@@ -16,6 +16,12 @@ or [IAT (Import Address Table)][IAT] entries in PE format used on Windows.
 Changes
 -------
 
+**2019-02-17:** Stop checking RELRO and check memory protection at
+runtime instead.
+
+**2019-02-03:** Fix crash when programs are compiled with compiler options
+`-Wl,-z,relro` and `-fno-plt` with the help of [JC Liang][]. ([#10][])
+
 **2018-02-06:** Android support was contributed by [Daniel Deptford][].
 
 **2017-10-01:** `plthook_elf.c` was rewritten. Plthook had needed to
@@ -118,6 +124,8 @@ Supported Platforms
 [QEMU]: http://www.qemu.org/
 [ELF]: https://en.wikipedia.org/wiki/Executable_and_Linkable_Format
 [Daniel Deptford]: https://github.com/redmercury
+[JC Liang]: https://github.com/tntljc
+[#10]: https://github.com/kubo/plthook/pull/10
 
 License
 -------
