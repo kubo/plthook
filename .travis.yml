@@ -44,8 +44,16 @@ matrix:
       env: OS=osx
       # macOS 10.10 Yosemite
       osx_image: xcode6.4
+    - language: android
+      env: OS=android
+      android:
+        components:
+          - sys-img-arm64-v8a-google_apis-25
+          - sys-img-armeabi-v7a-google_apis-25
+          #- sys-img-x86_64-google_apis-25
+          #- sys-img-x86-google_apis-25
 language: c
 before_install:
   - eval "${MATRIX_EVAL}"
 script:
-  - cd test && make check CROSS=$CROSS
+  - cd test && if [[ "$OS" == "android" ]]; then ./android/run_tests; else make check CROSS=$CROSS; fi

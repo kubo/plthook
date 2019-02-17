@@ -1,0 +1,72 @@
+#!/bin/bash
+
+cd "$(dirname "${BASH_SOURCE[0]}")"
+
+if test -z "$ANDROID_HOME"; then
+  echo "The environment variable ANDROID_HOME isn't set."
+  exit 1
+fi
+
+if ! test -x "$ANDROID_HOME/tools/bin/sdkmanager"; then
+  echo "Invalid environment variable ANDROID_HOME: $ANDROID_HOME"
+  exit 1
+fi
+
+PATH=$ANDROID_HOME/tools/bin:$ANDROID_HOME/ndk-bundle:$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools:$PATH
+
+set -e
+
+echodo() {
+  banner "$@"
+  "$@"
+  echo
+}
+
+banner() {
+  echo ==========================================
+  echo == $@
+  echo ==========================================
+}
+
+if test "$TRAVIS" = true; then
+  banner sdkmanager tools ndk-bundle emulator
+  # Discard stdout to suppress log size. Test stops when log size > 4M on traivis-ci.
+  echo yes | sdkmanager tools ndk-bundle emulator > /dev/null
+  echo
+fi
+
+echodo ndk-build
+
+API=25
+TAG=google_apis
+if test "$TRAVIS" = true; then
+  ABIS="arm64-v8a armeabi-v7a"
+else
+  ABIS="arm64-v8a armeabi-v7a x86 x86_64"
+fi
+
+for ABI in $ABIS; do
+  AVD_NAME=android-$API-$TAG-$ABI
+  if ! avdmanager list avd -c | grep "^$AVD_NAME$" > /dev/null; then
+    echo no | echodo avdmanager create avd -n $AVD_NAME -k "system-images;android-$API;$TAG;$ABI" -f
+  fi
+
+  banner emulator -avd $AVD_NAME -no-window -no-audio
+  emulator -avd $AVD_NAME -no-window -no-audio &
+  EMULATOR_PID=$!
+  trap "kill $EMULATOR_PID" EXIT
+  echo
+
+  echodo adb wait-for-device
+  echodo adb root
+  sleep 1
+  echodo adb push libs/$ABI/libtest.so /data/local
+  echodo adb push libs/$ABI/testprog /data/local
+  echodo adb shell "chmod 755 /data/local/libtest.so /data/local/testprog"
+  echodo adb shell "env LD_LIBRARY_PATH=/data/local /data/local/testprog open"
+  echodo adb shell "env LD_LIBRARY_PATH=/data/local /data/local/testprog open_by_address"
+  echodo adb shell "env LD_LIBRARY_PATH=/data/local /data/local/testprog open_by_handle"
+  kill $EMULATOR_PID
+  trap - EXIT
+  wait $EMULATOR_PID
+done
