@@ -40,6 +40,7 @@ typedef struct {
 enum open_mode {
     OPEN_MODE_DEFAULT,
     OPEN_MODE_BY_HANDLE,
+    OPEN_MODE_BY_ADDRESS,
 };
 
 static enum_test_data_t funcs_called_by_libtest[] = {
@@ -183,6 +184,7 @@ int main(int argc, char **argv)
     double arg;
     double result;
     void *handle;
+    void *address;
     enum open_mode open_mode;
 #if defined _WIN32 || defined __CYGWIN__
     const char *filename = "libtest.dll";
@@ -197,6 +199,8 @@ int main(int argc, char **argv)
         open_mode = OPEN_MODE_DEFAULT;
     } else if (strcmp(argv[1], "open_by_handle") == 0) {
         open_mode = OPEN_MODE_BY_HANDLE;
+    } else if (strcmp(argv[1], "open_by_address") == 0) {
+        open_mode = OPEN_MODE_BY_ADDRESS;
     } else {
         show_usage(argv[0]);
     }
@@ -242,6 +246,9 @@ int main(int argc, char **argv)
         assert(handle != NULL);
         CHK_PH(plthook_open_by_handle(&plthook, handle));
         break;
+    case OPEN_MODE_BY_ADDRESS:
+        CHK_PH(plthook_open_by_address(&plthook, &main));
+        break;
     }
     test_plthook_enum(plthook, funcs_called_by_main);
     CHK_PH(plthook_replace(plthook, "ceil_cdecl", (void*)ceil_cdecl_hook_func, (void**)&ceil_cdecl_old_func));
@@ -267,6 +274,18 @@ int main(int argc, char **argv)
 #endif
         assert(handle != NULL);
         CHK_PH(plthook_open_by_handle(&plthook, handle));
+        break;
+    case OPEN_MODE_BY_ADDRESS:
+#ifdef WIN32
+        handle = GetModuleHandle(filename);
+        assert(handle != NULL);
+        CHK_PH(plthook_open_by_address(&plthook, handle));
+#else
+        handle = dlopen(filename, RTLD_LAZY | RTLD_NOLOAD);
+        address = dlsym(handle, "ceil_cdecl");
+        assert(address != NULL);
+        CHK_PH(plthook_open_by_address(&plthook, (char*)address));
+#endif
         break;
     }
 

@@ -38,6 +38,7 @@ ifeq ($(UNAME_S),FreeBSD)
   # FreeBSD
   TESTS = relro_pie_tests
   LIBS = -lm -lutil
+  SKIP_OPEN_BY_ADDRESS_TEST = 1
 endif
 
 ifeq ($(findstring MINGW32_NT,$(UNAME_S)),MINGW32_NT)
@@ -77,6 +78,7 @@ run_tests: clean libtest.$(SOEXT) testprog$(EXEEXT)
 	cp libtest.$(SOEXT) testprog$(EXEEXT) ~/
 	cd && LD_LIBRARY_PATH=. $(QEMU_CMD) ./testprog$(EXEEXT) open
 	cd && LD_LIBRARY_PATH=. $(QEMU_CMD) ./testprog$(EXEEXT) open_by_handle
+	cd && test "$(SKIP_OPEN_BY_ADDRESS_TEST)" || env LD_LIBRARY_PATH=. $(QEMU_CMD) ./testprog$(EXEEXT) open_by_address
 
 check: $(TESTS)
 
