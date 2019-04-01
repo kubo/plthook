@@ -1,6 +1,6 @@
 /* -*- indent-tabs-mode: nil -*-
  *
- * plthook_win32.c -- implemention of plthook for PE format
+ * plthook_win32.c -- implementation of plthook for PE format
  *
  * URL: https://github.com/kubo/plthook
  *

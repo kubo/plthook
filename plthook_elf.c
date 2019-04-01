@@ -1,6 +1,6 @@
 /* -*- indent-tabs-mode: nil -*-
  *
- * plthook_elf.c -- implemention of plthook for ELF format
+ * plthook_elf.c -- implementation of plthook for ELF format
  *
  * URL: https://github.com/kubo/plthook
  *
