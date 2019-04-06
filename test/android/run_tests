@@ -68,5 +68,5 @@ for ABI in $ABIS; do
   echodo adb shell "env LD_LIBRARY_PATH=/data/local /data/local/testprog open_by_handle"
   kill $EMULATOR_PID
   trap - EXIT
-  wait $EMULATOR_PID
+  wait $EMULATOR_PID || true # ignore the exit code of the emulator process.
 done
