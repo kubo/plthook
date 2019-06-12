@@ -757,7 +757,7 @@ int plthook_replace(plthook_t *plthook, const char *funcname, void *funcaddr, vo
                 }
                 ++func_cnt;
                 /* if one symbol is found in plt, start searching from got */
-                if (pos < plthook->rela_plt_cnt) {
+                if (pos <= plthook->rela_plt_cnt) {
                     pos = plthook->rela_plt_cnt;
                 } else {
                     break;
