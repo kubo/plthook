@@ -728,13 +728,13 @@ int plthook_replace(plthook_t *plthook, const char *funcname, void *funcaddr, vo
     unsigned int pos = 0;
     const char *name;
     void **addr;
-    int rv;
+    int func_cnt = 0;
 
     if (plthook == NULL) {
         set_errmsg("invalid argument: The first argument is null.");
         return PLTHOOK_INVALID_ARGUMENT;
     }
-    while ((rv = plthook_enum(plthook, &pos, &name, &addr)) == 0) {
+    while (plthook_enum(plthook, &pos, &name, &addr) == 0) {
         if (strncmp(name, funcname, funcnamelen) == 0) {
             if (name[funcnamelen] == '\0' || name[funcnamelen] == '@') {
                 int prot = get_memory_permission(addr);
@@ -755,15 +755,21 @@ int plthook_replace(plthook_t *plthook, const char *funcname, void *funcaddr, vo
                 if (!(prot & PROT_WRITE)) {
                     mprotect(ALIGN_ADDR(addr), page_size, prot);
                 }
-                return 0;
+                ++func_cnt;
+                /* if one symbol is found in plt, start searching from got */
+                if (pos < plthook->rela_plt_cnt) {
+                    pos = plthook->rela_plt_cnt;
+                } else {
+                    break;
+                }
             }
         }
     }
-    if (rv == EOF) {
+    if (func_cnt == 0) {
         set_errmsg("no such function: %s", funcname);
-        rv = PLTHOOK_FUNCTION_NOT_FOUND;
+        return PLTHOOK_FUNCTION_NOT_FOUND;
     }
-    return rv;
+    return 0;
 }
 
 void plthook_close(plthook_t *plthook)
