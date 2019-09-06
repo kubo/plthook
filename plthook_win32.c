@@ -86,7 +86,7 @@ int plthook_open(plthook_t **plthook_out, const char *filename)
     HMODULE hMod;
 
     *plthook_out = NULL;
-    if (!GetModuleHandleExA(0, filename, &hMod)) {
+    if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, filename, &hMod)) {
         set_errmsg2("Cannot get module %s: ", filename);
         return PLTHOOK_FILE_NOT_FOUND;
     }
@@ -107,7 +107,7 @@ int plthook_open_by_address(plthook_t **plthook_out, void *address)
     HMODULE hMod;
 
     *plthook_out = NULL;
-    if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, address, &hMod)) {
+    if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT | GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, address, &hMod)) {
         set_errmsg2("Cannot get module at address %p: ", address);
         return PLTHOOK_FILE_NOT_FOUND;
     }
