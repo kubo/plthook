@@ -426,6 +426,7 @@ static int get_memory_permission(void *address)
     set_errmsg("Could not find memory region containing %p", (void*)addr);
     return 0;
 unknown_perms:
+    fclose(fp);
     set_errmsg("Unexcepted memory permission %s at %p", perms, (void*)addr);
     return 0;
 }
