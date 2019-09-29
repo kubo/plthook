@@ -725,13 +725,14 @@ int plthook_enum(plthook_t *plthook, unsigned int *pos, const char **name_out, v
 
 int plthook_replace(plthook_t *plthook, const char *funcname, void *funcaddr, void **oldfunc)
 {
+    void *symaddress = dlsym(RTLD_DEFAULT, funcname);
     size_t funcnamelen = strlen(funcname);
     unsigned int pos = 0;
     const char *name;
     void **addr;
     int rv;
 
-    if (plthook == NULL) {
+    if (plthook == NULL || symaddress == NULL) {
         set_errmsg("invalid argument: The first argument is null.");
         return PLTHOOK_INVALID_ARGUMENT;
     }
@@ -749,6 +750,8 @@ int plthook_replace(plthook_t *plthook, const char *funcname, void *funcaddr, vo
                         return PLTHOOK_INTERNAL_ERROR;
                     }
                 }
+                if (*addr != symaddress)
+                    *addr = symaddress;
                 if (oldfunc) {
                     *oldfunc = *addr;
                 }
