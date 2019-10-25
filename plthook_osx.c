@@ -6,7 +6,7 @@
  *
  * ------------------------------------------------------
  *
- * Copyright 2014 Kubo Takehiro <kubo@jiubao.org>
+ * Copyright 2014-2019 Kubo Takehiro <kubo@jiubao.org>
  *
  * Redistribution and use in source and binary forms, with or without modification, are
  * permitted provided that the following conditions are met:
@@ -37,6 +37,7 @@
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
+#include <inttypes.h>
 #include <dlfcn.h>
 #include <mach-o/dyld.h>
 #include "plthook.h"
@@ -72,11 +73,21 @@ struct plthook {
     bind_address_t entries[1];
 };
 
-static int plthook_open_real(plthook_t **plthook_out, const struct mach_header *mh);
-static unsigned int get_bind_addr(plthook_t *plthook, const uint8_t *base, uint32_t lazy_bind_off, uint32_t lazy_bind_size, struct segment_command_ **segments, int addrdiff);
+#define MAX_SEGMENTS 8
+
+typedef struct {
+    plthook_t *plthook;
+    intptr_t slide;
+    int num_segments;
+    int linkedit_segment_idx;
+    struct segment_command_ *segments[MAX_SEGMENTS];
+} data_t;
+
+static int plthook_open_real(plthook_t **plthook_out, uint32_t image_idx, const struct mach_header *mh, const char *image_name);
+static unsigned int set_bind_addrs(data_t *d, uint32_t lazy_bind_off, uint32_t lazy_bind_size);
+static void set_bind_addr(data_t *d, unsigned int *idx, const char *sym_name, int seg_index, int seg_offset);
 
 static void set_errmsg(const char *fmt, ...) __attribute__((__format__ (__printf__, 1, 2)));
-static void set_bind_addr(unsigned int *idx, plthook_t *plthook, const uint8_t *base, const char *sym_name, int seg_index, int seg_offset, struct segment_command_ **segments);
 
 static uint64_t uleb128(const uint8_t **p)
 {
@@ -113,33 +124,40 @@ static char errmsg[512];
 
 int plthook_open(plthook_t **plthook_out, const char *filename)
 {
-    uint32_t idx = 0;
+    size_t namelen;
+    uint32_t cnt;
+    uint32_t idx;
 
-    if (filename != NULL) {
-        size_t namelen = strlen(filename);
+    if (filename == NULL) {
+        return plthook_open_real(plthook_out, 0, NULL, NULL);
+    }
+    cnt = _dyld_image_count();
+    namelen = strlen(filename);
+    namelen = strlen(filename);
+    cnt = _dyld_image_count();
 
-        while (1) {
-            const char *image_name = _dyld_get_image_name(idx);
-            size_t offset = 0;
+    for (idx = 0; idx < cnt; idx++) {
+        const char *image_name = _dyld_get_image_name(idx);
+        size_t offset = 0;
 
-            if (image_name == NULL) {
-                *plthook_out = NULL;
-                set_errmsg("Cannot find file: %s", filename);
-                return PLTHOOK_FILE_NOT_FOUND;
+        if (image_name == NULL) {
+            *plthook_out = NULL;
+            set_errmsg("Cannot find file at image index %u", idx);
+            return PLTHOOK_INTERNAL_ERROR;
+        }
+        if (*filename != '/') {
+            size_t image_name_len = strlen(image_name);
+            if (image_name_len > namelen) {
+              offset = image_name_len - namelen;
             }
-            if (*filename != '/') {
-                size_t image_name_len = strlen(image_name);
-                if (image_name_len > namelen) {
-                    offset = image_name_len - namelen;
-                }
-            }
-            if (strcmp(image_name + offset, filename) == 0) {
-                break;
-            }
-            idx++;
+        }
+        if (strcmp(image_name + offset, filename) == 0) {
+            return plthook_open_real(plthook_out, idx, NULL, image_name);
         }
     }
-    return plthook_open_real(plthook_out, _dyld_get_image_header(idx));
+    *plthook_out = NULL;
+    set_errmsg("Cannot find file: %s", filename);
+    return PLTHOOK_FILE_NOT_FOUND;
 }
 
 int plthook_open_by_handle(plthook_t **plthook_out, void *hndl)
@@ -149,6 +167,7 @@ int plthook_open_by_handle(plthook_t **plthook_out, void *hndl)
         RTLD_LAZY | RTLD_NOLOAD | RTLD_FIRST,
     };
     int flag_idx;
+    uint32_t cnt = _dyld_image_count();
 #define NUM_FLAGS (sizeof(flags) / sizeof(flags[0]))
 
     if (hndl == NULL) {
@@ -156,18 +175,18 @@ int plthook_open_by_handle(plthook_t **plthook_out, void *hndl)
         return PLTHOOK_FILE_NOT_FOUND;
     }
     for (flag_idx = 0; flag_idx < NUM_FLAGS; flag_idx++) {
-        const char *image_name = NULL;
-        uint32_t idx = 0;
+        uint32_t idx;
 
-        do {
+        for (idx = 0; idx < cnt; idx++) {
+            const char *image_name = idx ? _dyld_get_image_name(idx) : NULL;
             void *handle = dlopen(image_name, flags[flag_idx]);
             if (handle != NULL) {
                 dlclose(handle);
                 if (handle == hndl) {
-                    return plthook_open_real(plthook_out, _dyld_get_image_header(idx));
+                    return plthook_open_real(plthook_out, idx, NULL, image_name);
                 }
             }
-        } while ((image_name = _dyld_get_image_name(++idx)) != NULL);
+        }
     }
     set_errmsg("Cannot find the image correspond to handle %p", hndl);
     return PLTHOOK_FILE_NOT_FOUND;
@@ -176,30 +195,43 @@ int plthook_open_by_handle(plthook_t **plthook_out, void *hndl)
 int plthook_open_by_address(plthook_t **plthook_out, void *address)
 {
     Dl_info dlinfo;
+    uint32_t idx = 0;
+    uint32_t cnt = _dyld_image_count();
 
     if (!dladdr(address, &dlinfo)) {
         *plthook_out = NULL;
         set_errmsg("Cannot find address: %p", address);
         return PLTHOOK_FILE_NOT_FOUND;
     }
-    return plthook_open_real(plthook_out, dlinfo.dli_fbase);
+    for (idx = 0; idx < cnt; idx++) {
+        if (dlinfo.dli_fbase == _dyld_get_image_header(idx)) {
+            return plthook_open_real(plthook_out, idx, dlinfo.dli_fbase, dlinfo.dli_fname);
+        }
+    }
+    set_errmsg("Cannot find the image index for base address: %p", dlinfo.dli_fbase);
+    return PLTHOOK_FILE_NOT_FOUND;
 }
 
-#define NUM_SEGMENTS 10
-
-static int plthook_open_real(plthook_t **plthook_out, const struct mach_header *mh)
+static int plthook_open_real(plthook_t **plthook_out, uint32_t image_idx, const struct mach_header *mh, const char *image_name)
 {
     struct load_command *cmd;
-    const uint8_t *base = (const uint8_t *)mh;
     uint32_t lazy_bind_off = 0;
     uint32_t lazy_bind_size = 0;
-    struct segment_command_ *segments[NUM_SEGMENTS];
-    int segment_idx = 0;
     unsigned int nbind;
-    int addrdiff = 0;
+    data_t data = {NULL,};
+    size_t size;
     int i;
 
-    memset(segments, 0, sizeof(segments));
+    data.linkedit_segment_idx = -1;
+    data.slide = _dyld_get_image_vmaddr_slide(image_idx);
+    DEBUG_CMD("slide=%"PRIxPTR"\n", data.slide);
+    if (mh == NULL) {
+        mh = _dyld_get_image_header(image_idx);
+    }
+    if (image_name == NULL) {
+        image_name = _dyld_get_image_name(image_idx);
+    }
+
 #ifdef __LP64__
     cmd = (struct load_command *)((size_t)mh + sizeof(struct mach_header_64));
 #else
@@ -224,11 +256,15 @@ static int plthook_open_real(plthook_t **plthook_out, const struct mach_header *
                       segment->fileoff, segment->filesize,
                       segment->maxprot, segment->initprot,
                       segment->nsects, segment->flags);
-            if (strcmp(segment->segname, "__LINKEDIT") == 0) {
-                addrdiff = segment->vmaddr - segment->fileoff;
-            }
 #ifndef __LP64__
-            segments[segment_idx++] = segment;
+            if (strcmp(segment->segname, "__LINKEDIT") == 0) {
+                data.linkedit_segment_idx = data.num_segments;
+            }
+            if (data.num_segments == MAX_SEGMENTS) {
+                set_errmsg("Too many segments:  %s", image_name);
+                return PLTHOOK_INTERNAL_ERROR;
+            }
+            data.segments[data.num_segments++] = segment;
 #endif
             break;
         case LC_SEGMENT_64: /* 0x19 */
@@ -244,11 +280,15 @@ static int plthook_open_real(plthook_t **plthook_out, const struct mach_header *
                       segment64->fileoff, segment64->filesize,
                       segment64->maxprot, segment64->initprot,
                       segment64->nsects, segment64->flags);
-            if (strcmp(segment64->segname, "__LINKEDIT") == 0) {
-                addrdiff = segment64->vmaddr - segment64->fileoff;
-            }
 #ifdef __LP64__
-            segments[segment_idx++] = segment64;
+            if (strcmp(segment64->segname, "__LINKEDIT") == 0) {
+                data.linkedit_segment_idx = data.num_segments;
+            }
+            if (data.num_segments == MAX_SEGMENTS) {
+                set_errmsg("Too many segments: %s", image_name);
+                return PLTHOOK_INTERNAL_ERROR;
+            }
+            data.segments[data.num_segments++] = segment64;
 #endif
             break;
         case LC_DYLD_INFO_ONLY: /* (0x22|LC_REQ_DYLD) */
@@ -312,30 +352,35 @@ static int plthook_open_real(plthook_t **plthook_out, const struct mach_header *
         }
         cmd = (struct load_command *)((size_t)cmd + cmd->cmdsize);
     }
-    nbind = get_bind_addr(NULL, base, lazy_bind_off, lazy_bind_size, segments, addrdiff);
-    *plthook_out = (plthook_t*)malloc(offsetof(plthook_t, entries) + sizeof(bind_address_t) * nbind);
-    (*plthook_out)->num_entries = nbind;
-    get_bind_addr(*plthook_out, base, lazy_bind_off, lazy_bind_size, segments, addrdiff);
+    if (data.linkedit_segment_idx == -1) {
+        set_errmsg("Cannot find the linkedit segment: %s", image_name);
+        return PLTHOOK_INVALID_FILE_FORMAT;
+    }
+    nbind = set_bind_addrs(&data, lazy_bind_off, lazy_bind_size);
+    size = offsetof(plthook_t, entries) + sizeof(bind_address_t) * nbind;
+    data.plthook = (plthook_t*)malloc(size);
+    if (data.plthook == NULL) {
+        set_errmsg("failed to allocate memory: %" PRIuPTR " bytes", size);
+        return PLTHOOK_OUT_OF_MEMORY;
+    }
+    data.plthook->num_entries = nbind;
+    set_bind_addrs(&data, lazy_bind_off, lazy_bind_size);
 
+    *plthook_out = data.plthook;
     return 0;
 }
 
-static unsigned int get_bind_addr(plthook_t *plthook, const uint8_t *base, uint32_t lazy_bind_off, uint32_t lazy_bind_size, struct segment_command_ **segments, int addrdiff)
+static unsigned int set_bind_addrs(data_t *data, uint32_t lazy_bind_off, uint32_t lazy_bind_size)
 {
-    const uint8_t *ptr = base + lazy_bind_off + addrdiff;
+    struct segment_command_ *linkedit = data->segments[data->linkedit_segment_idx];
+    const uint8_t *ptr = (uint8_t*)(linkedit->vmaddr - linkedit->fileoff + data->slide + lazy_bind_off);
     const uint8_t *end = ptr + lazy_bind_size;
     const char *sym_name;
     int seg_index = 0;
     uint64_t seg_offset = 0;
     int count, skip;
-    unsigned int idx;
-    DEBUG_BIND("get_bind_addr(%p, 0x%x, 0x%x", base, lazy_bind_off, lazy_bind_size);
-    for (idx = 0; segments[idx] != NULL; idx++) {
-        DEBUG_BIND(", [%s]", segments[idx]->segname);
-    }
-    DEBUG_BIND(")\n");
+    unsigned int idx = 0;
 
-    idx = 0;
     while (ptr < end) {
         uint8_t op = *ptr & BIND_OPCODE_MASK;
         uint8_t imm = *ptr & BIND_IMMEDIATE_MASK;
@@ -384,7 +429,7 @@ static unsigned int get_bind_addr(plthook_t *plthook, const uint8_t *base, uint3
             DEBUG_BIND("BIND_OPCODE_ADD_ADDR_ULEB: seg_offset = 0x%llx\n", seg_offset);
             break;
         case BIND_OPCODE_DO_BIND:
-            set_bind_addr(&idx, plthook, base, sym_name, seg_index, seg_offset, segments);
+            set_bind_addr(data, &idx, sym_name, seg_index, seg_offset);
             DEBUG_BIND("BIND_OPCODE_DO_BIND\n");
             break;
         case BIND_OPCODE_DO_BIND_ADD_ADDR_ULEB:
@@ -392,7 +437,7 @@ static unsigned int get_bind_addr(plthook_t *plthook, const uint8_t *base, uint3
             DEBUG_BIND("BIND_OPCODE_DO_BIND_ADD_ADDR_ULEB: seg_offset = 0x%llx\n", seg_offset);
             break;
         case BIND_OPCODE_DO_BIND_ADD_ADDR_IMM_SCALED:
-            set_bind_addr(&idx, plthook, base, sym_name, seg_index, seg_offset, segments);
+            set_bind_addr(data, &idx, sym_name, seg_index, seg_offset);
             seg_offset += imm * sizeof(void *);
             DEBUG_BIND("BIND_OPCODE_DO_BIND_ADD_ADDR_IMM_SCALED\n");
             break;
@@ -400,7 +445,7 @@ static unsigned int get_bind_addr(plthook_t *plthook, const uint8_t *base, uint3
             count = uleb128(&ptr);
             skip = uleb128(&ptr);
             for (i = 0; i < count; i++) {
-                set_bind_addr(&idx, plthook, base, sym_name, seg_index, seg_offset, segments);
+                set_bind_addr(data, &idx, sym_name, seg_index, seg_offset);
                 seg_offset += skip;
             }
             DEBUG_BIND("BIND_OPCODE_DO_BIND_ULEB_TIMES_SKIPPING_ULEB\n");
@@ -410,12 +455,12 @@ static unsigned int get_bind_addr(plthook_t *plthook, const uint8_t *base, uint3
     return idx;
 }
 
-static void set_bind_addr(unsigned int *idx, plthook_t *plthook, const uint8_t *base, const char *sym_name, int seg_index, int seg_offset, struct segment_command_ **segments)
+static void set_bind_addr(data_t *data, unsigned int *idx, const char *sym_name, int seg_index, int seg_offset)
 {
-    if (plthook != NULL) {
-        uint32_t vmaddr = segments[seg_index]->vmaddr;
-        plthook->entries[*idx].name = sym_name;
-        plthook->entries[*idx].addr = (void**)(base + vmaddr + seg_offset);
+    if (data->plthook != NULL) {
+        size_t vmaddr = data->segments[seg_index]->vmaddr;
+        data->plthook->entries[*idx].name = sym_name;
+        data->plthook->entries[*idx].addr = (void**)(vmaddr + data->slide + seg_offset);
     }
     (*idx)++;
 }
