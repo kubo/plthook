@@ -149,6 +149,7 @@ static double ceil_export_by_ordinal_hook_func(double arg)
 
 static void test_plthook_enum(plthook_t *plthook, enum_test_data_t *test_data)
 {
+#if 0 // Implementation changed to hash map so 'plthook_enum' is deleted
     unsigned int pos = 0;
     const char *name;
     void **addr;
@@ -170,6 +171,7 @@ static void test_plthook_enum(plthook_t *plthook, enum_test_data_t *test_data)
 	    exit(1);
 	}
     }
+#endif
 }
 
 static void show_usage(const char *arg0)

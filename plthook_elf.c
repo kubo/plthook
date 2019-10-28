@@ -174,6 +174,43 @@
 #endif
 #endif /* __LP64__ */
 
+static unsigned int strhash(const char* symbol) {
+    unsigned int h = 5381;
+    const unsigned char* name = (const unsigned char*)symbol;
+    while (*name && *name != '@') {
+        h += (h << 5) + *name++;
+    }
+    return h;
+}
+
+#define SYM_TYPE_COUNT_BITS         2
+#define countof(arr)                (sizeof(arr) / sizeof(arr[0]))
+struct plt_bucket_t {
+    struct plt_bucket_t* next;
+    size_t index:(sizeof(size_t)*8-SYM_TYPE_COUNT_BITS), type:SYM_TYPE_COUNT_BITS;
+};
+
+static const Elf_Xword bucket_type_to_sym_type[] = {
+    R_JUMP_SLOT,
+#ifdef R_GLOBAL_DATA
+    R_GLOBAL_DATA,
+#endif
+};
+
+// '_Static_assert' is added since C11
+#if __STDC_VERSION__ >= 201112L
+_Static_assert(countof(bucket_type_to_sym_type) <= (1 << SYM_TYPE_COUNT_BITS), "Bit size of type field in 'plt_bucket_t' is not enough");
+#endif
+
+static size_t sym_type_to_bucket_type(Elf_Xword r_type) {
+    for (size_t i = 0; i < sizeof(bucket_type_to_sym_type) / sizeof(Elf_Xword); ++i) {
+        if (r_type == bucket_type_to_sym_type[i]) {
+            return i;
+        }
+    }
+    return -1;
+}
+
 struct plthook {
     const Elf_Sym *dynsym;
     const char *dynstr;
@@ -185,6 +222,8 @@ struct plthook {
     const Elf_Plt_Rel *rela_dyn;
     size_t rela_dyn_cnt;
 #endif
+    struct plt_bucket_t** sym_bucket;
+    size_t sym_bucket_cnt;
 };
 
 static char errmsg[512];
@@ -199,6 +238,55 @@ static int plthook_open_real(plthook_t **plthook_out, struct link_map *lmap);
 static int check_elf_header(const Elf_Ehdr *ehdr);
 #endif
 static void set_errmsg(const char *fmt, ...) __attribute__((__format__ (__printf__, 1, 2)));
+
+static int check_rel(const plthook_t *plthook, const Elf_Plt_Rel *plt, Elf_Xword r_type, const char **name_out, void ***addr_out)
+{
+    if (ELF_R_TYPE(plt->r_info) == r_type) {
+        size_t idx = ELF_R_SYM(plt->r_info);
+        idx = plthook->dynsym[idx].st_name;
+        if (idx + 1 > plthook->dynstr_size) {
+            set_errmsg("too big section header string table index: %" SIZE_T_FMT, idx);
+            return PLTHOOK_INVALID_FILE_FORMAT;
+        }
+        *name_out = plthook->dynstr + idx;
+        *addr_out = (void**)(plthook->plt_addr_base + plt->r_offset);
+        return 0;
+    }
+    return -1;
+}
+
+static int add_buckets(plthook_t *plthook, const Elf_Plt_Rel *rela, size_t plt_cnt, Elf_Xword r_type)
+{
+    const char *name = 0;
+    void **addr = 0;
+    struct plt_bucket_t* bucket;
+    unsigned int bucket_index;
+    size_t type = sym_type_to_bucket_type(r_type);
+
+    for (size_t i = 0; i < plt_cnt; ++i) {
+        const Elf_Plt_Rel *plt = rela + i;
+        if (check_rel(plthook, plt, r_type, &name, &addr) >= 0) {
+            bucket_index = strhash(name) % plthook->sym_bucket_cnt;
+            bucket = malloc(sizeof(struct plt_bucket_t));
+            bucket->next = plthook->sym_bucket[bucket_index];
+            bucket->type = type;
+            bucket->index = i;
+            plthook->sym_bucket[bucket_index] = bucket;
+        }
+    }
+    return 0;
+}
+
+#define lookup_bucket(plthook, symbol)      \
+        ((plthook)->sym_bucket[strhash(symbol) % (plthook)->sym_bucket_cnt])
+
+#define bucket_type_to_rela(plthook, type)  ((type) == 0 ? (plthook)->rela_plt : (plthook)->rela_dyn)
+
+#define get_name_addr(plthook, bucket, rv, name_out, addr_out)                                                  \
+        {                                                                                                               \
+            const Elf_Plt_Rel *plt = (bucket_type_to_rela((plthook), (bucket)->type) + (bucket)->index);                \
+            (rv) = check_rel((plthook), plt, bucket_type_to_sym_type[(bucket)->type], (name_out), (addr_out));  \
+        }
 
 #if defined __ANDROID__
 struct dl_iterate_data {
@@ -587,6 +675,13 @@ static int plthook_open_real(plthook_t **plthook_out, struct link_map *lmap)
             return PLTHOOK_INTERNAL_ERROR;
         }
         plthook.rela_plt_cnt = dyn->d_un.d_val / sizeof(Elf_Plt_Rel);
+
+        for (size_t i = 0; i < plthook.rela_plt_cnt; ++i) {
+            const Elf_Plt_Rel *plt = plthook.rela_plt + i;
+            if (ELF_R_TYPE(plt->r_info) == R_JUMP_SLOT) {
+                ++plthook.sym_bucket_cnt;
+            }
+        }
     }
 #ifdef R_GLOBAL_DATA
     /* get .rela.dyn or .rel.dyn section */
@@ -609,6 +704,13 @@ static int plthook_open_real(plthook_t **plthook_out, struct link_map *lmap)
         }
         elem_size = dyn->d_un.d_ptr;
         plthook.rela_dyn_cnt = total_size / elem_size;
+
+        for (size_t i = 0; i < plthook.rela_dyn_cnt; ++i) {
+            const Elf_Plt_Rel *plt = plthook.rela_dyn + i;
+            if (ELF_R_TYPE(plt->r_info) == R_GLOBAL_DATA) {
+                ++plthook.sym_bucket_cnt;
+            }
+        }
     }
 #endif
 
@@ -623,6 +725,28 @@ static int plthook_open_real(plthook_t **plthook_out, struct link_map *lmap)
         return PLTHOOK_INTERNAL_ERROR;
     }
 #endif
+
+    /* allocate hash buckets */
+    {
+        size_t total_size;
+
+        plthook.sym_bucket_cnt *= 7;
+        for (int i = 0; i < 32; ++i) {
+            plthook.sym_bucket_cnt |= (plthook.sym_bucket_cnt >> 1);
+        }
+        if (plthook.sym_bucket_cnt == 0) {
+            plthook.sym_bucket_cnt = 1;
+        }
+        total_size = plthook.sym_bucket_cnt * sizeof(struct plt_bucket_t*);
+
+        plthook.sym_bucket = malloc(total_size);
+        memset(plthook.sym_bucket, 0, total_size);
+
+        add_buckets(&plthook, plthook.rela_plt, plthook.rela_plt_cnt, R_JUMP_SLOT);
+#ifdef R_GLOBAL_DATA
+        add_buckets(&plthook, plthook.rela_dyn, plthook.rela_dyn_cnt, R_GLOBAL_DATA);
+#endif
+    }
 
     *plthook_out = malloc(sizeof(plthook_t));
     if (*plthook_out == NULL) {
@@ -682,51 +806,10 @@ static int check_elf_header(const Elf_Ehdr *ehdr)
 }
 #endif
 
-static int check_rel(const plthook_t *plthook, const Elf_Plt_Rel *plt, Elf_Xword r_type, const char **name_out, void ***addr_out)
-{
-    if (ELF_R_TYPE(plt->r_info) == r_type) {
-        size_t idx = ELF_R_SYM(plt->r_info);
-        idx = plthook->dynsym[idx].st_name;
-        if (idx + 1 > plthook->dynstr_size) {
-            set_errmsg("too big section header string table index: %" SIZE_T_FMT, idx);
-            return PLTHOOK_INVALID_FILE_FORMAT;
-        }
-        *name_out = plthook->dynstr + idx;
-        *addr_out = (void**)(plthook->plt_addr_base + plt->r_offset);
-        return 0;
-    }
-    return -1;
-}
-
-int plthook_enum(plthook_t *plthook, unsigned int *pos, const char **name_out, void ***addr_out)
-{
-    while (*pos < plthook->rela_plt_cnt) {
-        const Elf_Plt_Rel *plt = plthook->rela_plt + *pos;
-        int rv = check_rel(plthook, plt, R_JUMP_SLOT, name_out, addr_out);
-        (*pos)++;
-        if (rv >= 0) {
-            return rv;
-        }
-    }
-#ifdef R_GLOBAL_DATA
-    while (*pos < plthook->rela_plt_cnt + plthook->rela_dyn_cnt) {
-        const Elf_Plt_Rel *plt = plthook->rela_dyn + (*pos - plthook->rela_plt_cnt);
-        int rv = check_rel(plthook, plt, R_GLOBAL_DATA, name_out, addr_out);
-        (*pos)++;
-        if (rv >= 0) {
-            return rv;
-        }
-    }
-#endif
-    *name_out = NULL;
-    *addr_out = NULL;
-    return EOF;
-}
-
 int plthook_replace(plthook_t *plthook, const char *funcname, void *funcaddr, void **oldfunc)
 {
     size_t funcnamelen = strlen(funcname);
-    unsigned int pos = 0;
+    struct plt_bucket_t* bucket;
     const char *name;
     void **addr;
     int func_cnt = 0;
@@ -735,8 +818,12 @@ int plthook_replace(plthook_t *plthook, const char *funcname, void *funcaddr, vo
         set_errmsg("invalid argument: The first argument is null.");
         return PLTHOOK_INVALID_ARGUMENT;
     }
-    while (plthook_enum(plthook, &pos, &name, &addr) == 0) {
-        if (strncmp(name, funcname, funcnamelen) == 0) {
+
+    bucket = lookup_bucket(plthook, funcname);
+    while (bucket) {
+        int rv;
+        get_name_addr(plthook, bucket, rv, &name, &addr);
+        if (rv >= 0 && strncmp(name, funcname, funcnamelen) == 0) {
             if (name[funcnamelen] == '\0' || name[funcnamelen] == '@') {
                 int prot = get_memory_permission(addr);
                 if (prot == 0) {
@@ -757,14 +844,9 @@ int plthook_replace(plthook_t *plthook, const char *funcname, void *funcaddr, vo
                     mprotect(ALIGN_ADDR(addr), page_size, prot);
                 }
                 ++func_cnt;
-                /* if one symbol is found in plt, start searching from got */
-                if (pos <= plthook->rela_plt_cnt) {
-                    pos = plthook->rela_plt_cnt;
-                } else {
-                    break;
-                }
             }
         }
+        bucket = bucket->next;
     }
     if (func_cnt == 0) {
         set_errmsg("no such function: %s", funcname);
