@@ -396,7 +396,6 @@ static int get_memory_permission(void *address)
         }
         if (start <= addr && addr < end) {
             int prot = 0;
-            fclose(fp);
             if (perms[0] == 'r') {
                 prot |= PROT_READ;
             } else if (perms[0] != '-') {
@@ -419,6 +418,7 @@ static int get_memory_permission(void *address)
                 perms[4] = '\0';
                 goto unknown_perms;
             }
+            fclose(fp);
             return prot;
         }
     }
