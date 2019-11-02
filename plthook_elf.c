@@ -187,7 +187,14 @@ struct plthook {
 #endif
 };
 
+#ifndef PLTHOOK_NO_ERRMSG
 static char errmsg[512];
+static void set_errmsg(const char *fmt, ...) __attribute__((__format__ (__printf__, 1, 2)));
+#else
+# define set_errmsg(...) do {} while (0)
+const char *plthook_error(void) { return NULL; }
+#endif
+
 static size_t page_size;
 #define ALIGN_ADDR(addr) ((void*)((size_t)(addr) & ~(page_size - 1)))
 
@@ -198,7 +205,6 @@ static int plthook_open_real(plthook_t **plthook_out, struct link_map *lmap);
 #if defined __FreeBSD__ || defined __sun
 static int check_elf_header(const Elf_Ehdr *ehdr);
 #endif
-static void set_errmsg(const char *fmt, ...) __attribute__((__format__ (__printf__, 1, 2)));
 
 #if defined __ANDROID__
 struct dl_iterate_data {
@@ -774,6 +780,7 @@ void plthook_close(plthook_t *plthook)
     }
 }
 
+#ifndef PLTHOOK_NO_ERRMSG
 const char *plthook_error(void)
 {
     return errmsg;
@@ -786,3 +793,4 @@ static void set_errmsg(const char *fmt, ...)
     vsnprintf(errmsg, sizeof(errmsg) - 1, fmt, ap);
     va_end(ap);
 }
+#endif
