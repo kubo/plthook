@@ -18,6 +18,10 @@ matrix:
         - make relro_pie_tests CC=gcc-8
         - make relro_pie_m32_tests CC=gcc-8
         - make relro_pie_tests_on_valgrind CC=gcc-8
+        - export OPT_CFLAGS=-O3
+        - make relro_pie_tests CC=gcc-8
+        - make relro_pie_m32_tests CC=gcc-8
+        - make relro_pie_tests_on_valgrind CC=gcc-8
     - name: arm, armhf, arm64, ppc and ppc64le on QEMU 2.8
       os: linux
       dist: xenial
@@ -44,11 +48,19 @@ matrix:
         - make relro_pie_tests TARGET_PLATFORM=aarch64-linux-gnu
         - make relro_pie_tests TARGET_PLATFORM=powerpc-linux-gnu QEMU_ARCH=ppc
         - make relro_pie_tests TARGET_PLATFORM=powerpc64le-linux-gnu QEMU_ARCH=ppc64le
+        - export OPT_CFLAGS=-O3
+        - make relro_pie_tests TARGET_PLATFORM=arm-linux-gnueabi
+        - make relro_pie_tests TARGET_PLATFORM=arm-linux-gnueabihf
+        - make relro_pie_tests TARGET_PLATFORM=aarch64-linux-gnu
+        - make relro_pie_tests TARGET_PLATFORM=powerpc-linux-gnu QEMU_ARCH=ppc
+        - make relro_pie_tests TARGET_PLATFORM=powerpc64le-linux-gnu QEMU_ARCH=ppc64le
     - name: macOS 10.14 Mojave (The latest supported by travis)
       os: osx
       osx_image: xcode11.2
       script:
         - cd test
+        - make run_tests
+        - export OPT_CFLAGS=-O3
         - make run_tests
     - name: macOS 10.13 High Sierra (The latest Xcode supporting 32-bit)
       os: osx
@@ -57,11 +69,17 @@ matrix:
         - cd test
         - make run_tests
         - make run_tests EXTRA_CFLAGS=-m32
+        - export OPT_CFLAGS=-O3
+        - make run_tests
+        - make run_tests EXTRA_CFLAGS=-m32
     - name: macOS 10.10 Yosemite (The oldest supported by travis)
       os: osx
       osx_image: xcode6.4
       script:
         - cd test
+        - make run_tests
+        - make run_tests EXTRA_CFLAGS=-m32
+        - export OPT_CFLAGS=-O3
         - make run_tests
         - make run_tests EXTRA_CFLAGS=-m32
     - name: Android arm64 and armeabi
