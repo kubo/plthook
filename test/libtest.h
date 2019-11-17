@@ -12,16 +12,16 @@
 #endif
 
 LIBTESTAPI
-double ceil_cdecl(double x);
+double strtod_cdecl(const char *str, char **endptr);
 
 #if defined _WIN32 || defined __CYGWIN__
 LIBTESTAPI
-double __stdcall ceil_stdcall(double x);
+double __stdcall strtod_stdcall(const char *str, char **endptr);
 
 LIBTESTAPI
-double __fastcall ceil_fastcall(double x);
+double __fastcall strtod_fastcall(const char *str, char **endptr);
 
-double ceil_export_by_ordinal(double x);
+double strtod_export_by_ordinal(const char *str, char **endptr);
 #endif
 
 #endif

@@ -1,7 +1,8 @@
+language: c
 matrix:
   include:
-    - os: linux
-      env: OS=linux MATRIX_EVAL=CC=gcc-8
+    - name: Linux x86_64 and i686 with and without valgrind
+      os: linux
       addons:
         apt:
           sources:
@@ -12,9 +13,17 @@ matrix:
             - libc6-dbg:i386
             - linux-libc-dev:i386
             - valgrind
-    - os: linux
-      # Use QEMU 2.8 in ppa:panfaust/qemu-backports
-      env: OS=linux-cross CROSS=1
+      script:
+        - cd test
+        - make relro_pie_tests CC=gcc-8
+        - make relro_pie_m32_tests CC=gcc-8
+        - make relro_pie_tests_on_valgrind CC=gcc-8
+        - export OPT_CFLAGS=-O3
+        - make relro_pie_tests CC=gcc-8
+        - make relro_pie_m32_tests CC=gcc-8
+        - make relro_pie_tests_on_valgrind CC=gcc-8
+    - name: arm, armhf, arm64, ppc and ppc64le on QEMU 2.8
+      os: linux
       dist: xenial
       addons:
         apt:
@@ -32,28 +41,54 @@ matrix:
             - libc6-dev-powerpc-cross
             - libc6-dev-armel-cross
             - libc6-dev-arm64-cross
-    - os: osx
-      env: OS=osx
-      # macOS 10.12 Sierra
-      osx_image: xcode8.3
-    - os: osx
-      env: OS=osx
-      # macOS 10.11 El Capitan
-      osx_image: xcode7.3
-    - os: osx
-      env: OS=osx
-      # macOS 10.10 Yosemite
+      script:
+        - cd test
+        - make relro_pie_tests TARGET_PLATFORM=arm-linux-gnueabi
+        - make relro_pie_tests TARGET_PLATFORM=arm-linux-gnueabihf
+        - make relro_pie_tests TARGET_PLATFORM=aarch64-linux-gnu
+        - make relro_pie_tests TARGET_PLATFORM=powerpc-linux-gnu QEMU_ARCH=ppc
+        - make relro_pie_tests TARGET_PLATFORM=powerpc64le-linux-gnu QEMU_ARCH=ppc64le
+        - export OPT_CFLAGS=-O3
+        - make relro_pie_tests TARGET_PLATFORM=arm-linux-gnueabi
+        - make relro_pie_tests TARGET_PLATFORM=arm-linux-gnueabihf
+        - make relro_pie_tests TARGET_PLATFORM=aarch64-linux-gnu
+        - make relro_pie_tests TARGET_PLATFORM=powerpc-linux-gnu QEMU_ARCH=ppc
+        - make relro_pie_tests TARGET_PLATFORM=powerpc64le-linux-gnu QEMU_ARCH=ppc64le
+    - name: macOS 10.14 Mojave (The latest supported by travis)
+      os: osx
+      osx_image: xcode11.2
+      script:
+        - cd test
+        - make run_tests
+        - export OPT_CFLAGS=-O3
+        - make run_tests
+    - name: macOS 10.13 High Sierra (The latest Xcode supporting 32-bit)
+      os: osx
+      osx_image: xcode10.1
+      script:
+        - cd test
+        - make run_tests
+        - make run_tests EXTRA_CFLAGS=-m32
+        - export OPT_CFLAGS=-O3
+        - make run_tests
+        - make run_tests EXTRA_CFLAGS=-m32
+    - name: macOS 10.10 Yosemite (The oldest supported by travis)
+      os: osx
       osx_image: xcode6.4
-    - language: android
-      env: OS=android
+      script:
+        - cd test
+        - make run_tests
+        - make run_tests EXTRA_CFLAGS=-m32
+        - export OPT_CFLAGS=-O3
+        - make run_tests
+        - make run_tests EXTRA_CFLAGS=-m32
+    - name: Android arm64 and armeabi
+      language: android
       android:
         components:
           - sys-img-arm64-v8a-google_apis-25
           - sys-img-armeabi-v7a-google_apis-25
           #- sys-img-x86_64-google_apis-25
           #- sys-img-x86-google_apis-25
-language: c
-before_install:
-  - eval "${MATRIX_EVAL}"
-script:
-  - cd test && if [[ "$OS" == "android" ]]; then ./android/run_tests; else make check CROSS=$CROSS; fi
+      script:
+        - ./test/android/run_tests
