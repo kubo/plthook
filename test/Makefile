@@ -50,7 +50,7 @@ endif
 
 ifeq ($(UNAME_S),Darwin)
   # OS X
-  CFLAGS_SHARED = -shared -fPIC -Wno-deprecated-declarations -fno-builtin-ceil
+  CFLAGS_SHARED = -shared -fPIC -Wno-deprecated-declarations
   LIBS = -ldl
   PLTHOOK_C = plthook_osx.c
 endif

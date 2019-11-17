@@ -1,5 +1,4 @@
 #include <plthook.h>
-#include <math.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -18,20 +17,6 @@
     } \
 } while (0)
 
-#define CHK_DBL_EQ(val1, val2) do { \
-    if (val1 != val2) { \
-        fprintf(stderr, "%f != %f at line %d\n", val1, val2, __LINE__); \
-        exit(1); \
-    } \
-} while (0)
-
-#define CHK_DBL_NEQ(val1, val2) do { \
-    if (val1 == val2) { \
-        fprintf(stderr, "%f == %f at line %d\n", val1, val2, __LINE__); \
-        exit(1); \
-    } \
-} while (0)
-
 typedef struct {
     const char *name;
     int enumerated;
@@ -44,105 +29,151 @@ enum open_mode {
 };
 
 static enum_test_data_t funcs_called_by_libtest[] = {
-#if defined __APPLE__
-    {"_ceil", 0},
+#if defined __APPLE__ && defined __LP64__
+    {"_strtod", 0},
+#elif defined __APPLE__ && !defined __LP64__
+    {"_strtod$UNIX2003", 0},
 #else
-    {"ceil", 0},
+    {"strtod", 0},
 #endif
     {NULL, },
 };
 
 static enum_test_data_t funcs_called_by_main[] = {
 #if defined _WIN64 || (defined __CYGWIN__ && defined __x86_64__)
-    {"ceil_cdecl", 0},
-    {"ceil_stdcall", 0},
-    {"ceil_fastcall", 0},
+    {"strtod_cdecl", 0},
+    {"strtod_stdcall", 0},
+    {"strtod_fastcall", 0},
 #ifndef __CYGWIN__
     {"libtest.dll:@10", 0},
 #endif
 #elif defined _WIN32 && defined __GNUC__
-    {"ceil_cdecl", 0},
-    {"ceil_stdcall@8", 0},
-    {"@ceil_fastcall@8", 0},
+    {"strtod_cdecl", 0},
+    {"strtod_stdcall@8", 0},
+    {"@strtod_fastcall@8", 0},
 #elif defined _WIN32 && !defined __GNUC__
-    {"ceil_cdecl", 0},
-    {"_ceil_stdcall@8", 0},
-    {"@ceil_fastcall@8", 0},
+    {"strtod_cdecl", 0},
+    {"_strtod_stdcall@8", 0},
+    {"@strtod_fastcall@8", 0},
     {"libtest.dll:@10", 0},
 #elif defined __APPLE__
-    {"_ceil_cdecl", 0},
+    {"_strtod_cdecl", 0},
 #else
-    {"ceil_cdecl", 0},
+    {"strtod_cdecl", 0},
 #endif
     {NULL, },
 };
 
-static double ceil_arg = 0.0;
-static double ceil_result = 0.0;
-static double ceil_cdecl_arg = 0.0;
-static double ceil_cdecl_result = 0.0;
+#define STRTOD_STR_SIZE 30
+
+typedef struct {
+    char str[STRTOD_STR_SIZE];
+    double result;
+} hooked_val_t;
+
+/* value captured by hook from executable to libtest. */
+static hooked_val_t val_exe2lib;
+/* value captured by hook from libtest to libc. */
+static hooked_val_t val_lib2libc;
+
+static void reset_result(void)
+{
+    val_exe2lib.str[0] = '\0';
+    val_exe2lib.result = 0.0;
+    val_lib2libc.str[0] = '\0';
+    val_lib2libc.result = 0.0;
+}
+
+static void set_result(hooked_val_t *hv, const char *str, double result)
+{
+    strncpy(hv->str, str, sizeof(hv->str));
+    hv->result = result;
+}
+
+static void check_result(const char *str, double result, double expected_result, long line)
+{
+    if (result != expected_result) {
+        goto error;
+    }
+    if (strcmp(val_exe2lib.str, str) != 0) {
+        goto error;
+    }
+    if (val_exe2lib.result != result) {
+        goto error;
+    }
+    if (strcmp(val_lib2libc.str, str) != 0) {
+        goto error;
+    }
+    if (val_lib2libc.result != result) {
+        goto error;
+    }
+    return;
+error:
+    fprintf(stderr,
+            "Error: ['%s', %f, %f] ['%s', %f] ['%s', %f] at line %ld\n",
+            str, result, expected_result,
+            val_exe2lib.str, val_exe2lib.result,
+            val_lib2libc.str, val_lib2libc.result,
+            line);
+    exit(1);
+}
+
+#define CHK_RESULT(func_name, str, expected_result) do { \
+    double result__; \
+    reset_result(); \
+    result__ = func_name(str, NULL); \
+    check_result(str, result__, expected_result, __LINE__); \
+} while (0)
+
+static double (*strtod_cdecl_old_func)(const char *, char**);
 #if defined _WIN32 || defined __CYGWIN__
-static double ceil_stdcall_arg = 0.0;
-static double ceil_stdcall_result = 0.0;
-static double ceil_fastcall_arg = 0.0;
-static double ceil_fastcall_result = 0.0;
+static double (__stdcall *strtod_stdcall_old_func)(const char *, char**);
+static double (__fastcall *strtod_fastcall_old_func)(const char *, char**);
+#endif
+#if defined _WIN32
+static double (*strtod_export_by_ordinal_old_func)(const char *, char**);
+#endif
+
+/* hook func from libtest to libc. */
+static double strtod_hook_func(const char *str, char **endptr)
+{
+    double result = strtod(str, endptr);
+    set_result(&val_lib2libc, str, result);
+    return result;
+}
+
+/* hook func from testprog to libtest. */
+static double strtod_cdecl_hook_func(const char *str, char **endptr)
+{
+    double result = strtod_cdecl_old_func(str, endptr);
+    set_result(&val_exe2lib, str, result);
+    return result;
+}
+
+#if defined _WIN32 || defined __CYGWIN__
+/* hook func from testprog to libtest. */
+static double __stdcall strtod_stdcall_hook_func(const char *str, char **endptr)
+{
+    double result = strtod_stdcall_old_func(str, endptr);
+    set_result(&val_exe2lib, str, result);
+    return result;
+}
+
+/* hook func from testprog to libtest. */
+static double __fastcall strtod_fastcall_hook_func(const char *str, char **endptr)
+{
+    double result = strtod_fastcall_old_func(str, endptr);
+    set_result(&val_exe2lib, str, result);
+    return result;
+}
 #endif
 
 #if defined _WIN32
-static double ceil_export_by_ordinal_arg = 0.0;
-static double ceil_export_by_ordinal_result = 0.0;
-#endif
-
-static double (*ceil_cdecl_old_func)(double);
-#if defined _WIN32 || defined __CYGWIN__
-static double (__stdcall *ceil_stdcall_old_func)(double);
-static double (__fastcall *ceil_fastcall_old_func)(double);
-#endif
-
-#if defined _WIN32
-static double (*ceil_export_by_ordinal_old_func)(double);
-#endif
-
-static double ceil_hook_func(double arg)
+/* hook func from testprog to libtest. */
+static double strtod_export_by_ordinal_hook_func(const char *str, char **endptr)
 {
-    double result = ceil(arg);
-    ceil_arg = arg;
-    ceil_result = result;
-    return result;
-}
-
-static double ceil_cdecl_hook_func(double arg)
-{
-    double result = ceil_cdecl_old_func(arg);
-    ceil_cdecl_arg = arg;
-    ceil_cdecl_result = result;
-    return result;
-}
-
-#if defined _WIN32 || defined __CYGWIN__
-static double __stdcall ceil_stdcall_hook_func(double arg)
-{
-    double result = ceil_stdcall_old_func(arg);
-    ceil_stdcall_arg = arg;
-    ceil_stdcall_result = result;
-    return result;
-}
-
-static double __fastcall ceil_fastcall_hook_func(double arg)
-{
-    double result = ceil_fastcall_old_func(arg);
-    ceil_fastcall_arg = arg;
-    ceil_fastcall_result = result;
-    return result;
-}
-#endif
-
-#if defined _WIN32
-static double ceil_export_by_ordinal_hook_func(double arg)
-{
-    double result = ceil_export_by_ordinal_old_func(arg);
-    ceil_export_by_ordinal_arg = arg;
-    ceil_export_by_ordinal_result = result;
+    double result = strtod_export_by_ordinal_old_func(str, endptr);
+    set_result(&val_exe2lib, str, result);
     return result;
 }
 #endif
@@ -155,83 +186,33 @@ static void test_plthook_enum(plthook_t *plthook, enum_test_data_t *test_data)
     int i;
 
     while (plthook_enum(plthook, &pos, &name, &addr) == 0) {
-#if 0
-        printf("name = %s, address = %p at %p\n", name, *addr, addr);
-#endif
-	for (i = 0; test_data[i].name != NULL; i++) {
-	    if (strcmp(test_data[i].name, name) == 0) {
-	        test_data[i].enumerated = 1;
-	    }
-	}
+        for (i = 0; test_data[i].name != NULL; i++) {
+            if (strcmp(test_data[i].name, name) == 0) {
+                test_data[i].enumerated = 1;
+            }
+        }
     }
     for (i = 0; test_data[i].name != NULL; i++) {
         if (!test_data[i].enumerated) {
-	    fprintf(stderr, "%s is not enumerated by plthook_enum.\n", test_data[i].name);
-	    exit(1);
-	}
+            fprintf(stderr, "%s is not enumerated by plthook_enum.\n", test_data[i].name);
+            pos = 0;
+            while (plthook_enum(plthook, &pos, &name, &addr) == 0) {
+                printf("   %s\n", name);
+            }
+            exit(1);
+        }
     }
 }
 
 static void show_usage(const char *arg0)
 {
     fprintf(stderr, "Usage: %s (open | open_by_handle)\n", arg0);
-    exit(1);
 }
 
-int main(int argc, char **argv)
+static void hook_function_calls_in_executable(enum open_mode open_mode)
 {
     plthook_t *plthook;
-    double arg;
-    double result;
     void *handle;
-    void *address;
-    enum open_mode open_mode;
-#if defined _WIN32 || defined __CYGWIN__
-    const char *filename = "libtest.dll";
-#else
-    const char *filename = "libtest.so";
-#endif
-
-    if (argc != 2) {
-        show_usage(argv[0]);
-    }
-    if (strcmp(argv[1], "open") == 0) {
-        open_mode = OPEN_MODE_DEFAULT;
-    } else if (strcmp(argv[1], "open_by_handle") == 0) {
-        open_mode = OPEN_MODE_BY_HANDLE;
-    } else if (strcmp(argv[1], "open_by_address") == 0) {
-        open_mode = OPEN_MODE_BY_ADDRESS;
-    } else {
-        show_usage(argv[0]);
-    }
-
-    /* Call ceil_cdecl(), ceil_stdcall() and ceil_fastcall() before plthook_replace()
-     * to resolve the address by lazy binding.
-     */
-    arg = 1.3;
-    ceil_cdecl(arg);
-#if defined _WIN32 || defined __CYGWIN__
-    ceil_stdcall(arg);
-    ceil_fastcall(arg);
-#endif
-#if defined _WIN32
-    ceil_export_by_ordinal(arg);
-#endif
-    /* ensure that *_result and *_arg are not changed. */
-    CHK_DBL_EQ(ceil_arg, 0.0);
-    CHK_DBL_EQ(ceil_result, 0.0);
-    CHK_DBL_EQ(ceil_cdecl_arg, 0.0);
-    CHK_DBL_EQ(ceil_cdecl_result, 0.0);
-#if defined _WIN32 || defined __CYGWIN__
-    CHK_DBL_EQ(ceil_stdcall_arg, 0.0);
-    CHK_DBL_EQ(ceil_stdcall_result, 0.0);
-    CHK_DBL_EQ(ceil_fastcall_arg, 0.0);
-    CHK_DBL_EQ(ceil_fastcall_result, 0.0);
-#endif
-#if defined _WIN32
-    CHK_DBL_EQ(ceil_export_by_ordinal_arg, 0.0);
-    CHK_DBL_EQ(ceil_export_by_ordinal_result, 0.0);
-#endif
 
     switch (open_mode) {
     case OPEN_MODE_DEFAULT:
@@ -247,20 +228,33 @@ int main(int argc, char **argv)
         CHK_PH(plthook_open_by_handle(&plthook, handle));
         break;
     case OPEN_MODE_BY_ADDRESS:
-        CHK_PH(plthook_open_by_address(&plthook, &main));
+        CHK_PH(plthook_open_by_address(&plthook, &show_usage));
         break;
     }
     test_plthook_enum(plthook, funcs_called_by_main);
-    CHK_PH(plthook_replace(plthook, "ceil_cdecl", (void*)ceil_cdecl_hook_func, (void**)&ceil_cdecl_old_func));
+    CHK_PH(plthook_replace(plthook, "strtod_cdecl", (void*)strtod_cdecl_hook_func, (void**)&strtod_cdecl_old_func));
 #if defined _WIN32 || defined __CYGWIN__
-    CHK_PH(plthook_replace(plthook, "ceil_stdcall", (void*)ceil_stdcall_hook_func, (void**)&ceil_stdcall_old_func));
-    CHK_PH(plthook_replace(plthook, "ceil_fastcall", (void*)ceil_fastcall_hook_func, (void**)&ceil_fastcall_old_func));
+    CHK_PH(plthook_replace(plthook, "strtod_stdcall", (void*)strtod_stdcall_hook_func, (void**)&strtod_stdcall_old_func));
+    CHK_PH(plthook_replace(plthook, "strtod_fastcall", (void*)strtod_fastcall_hook_func, (void**)&strtod_fastcall_old_func));
 #endif
 #if defined _WIN32
-    CHK_PH(plthook_replace(plthook, "libtest.dll:@10", (void*)ceil_export_by_ordinal_hook_func, (void**)&ceil_export_by_ordinal_old_func));
+    CHK_PH(plthook_replace(plthook, "libtest.dll:@10", (void*)strtod_export_by_ordinal_hook_func, (void**)&strtod_export_by_ordinal_old_func));
 #endif
     plthook_close(plthook);
+}
 
+static void hook_function_calls_in_library(enum open_mode open_mode)
+{
+    plthook_t *plthook;
+    void *handle;
+#if defined _WIN32 || defined __CYGWIN__
+    const char *filename = "libtest.dll";
+#else
+    const char *filename = "libtest.so";
+#endif
+#ifndef WIN32
+    void *address;
+#endif
 
     switch (open_mode) {
     case OPEN_MODE_DEFAULT:
@@ -282,51 +276,57 @@ int main(int argc, char **argv)
         CHK_PH(plthook_open_by_address(&plthook, handle));
 #else
         handle = dlopen(filename, RTLD_LAZY | RTLD_NOLOAD);
-        address = dlsym(handle, "ceil_cdecl");
+        address = dlsym(handle, "strtod_cdecl");
         assert(address != NULL);
         CHK_PH(plthook_open_by_address(&plthook, (char*)address));
 #endif
         break;
     }
-
     test_plthook_enum(plthook, funcs_called_by_libtest);
-    CHK_PH(plthook_replace(plthook, "ceil", (void*)ceil_hook_func, NULL));
+    CHK_PH(plthook_replace(plthook, "strtod", (void*)strtod_hook_func, NULL));
     plthook_close(plthook);
+}
 
-    arg = 3.7;
-    result = ceil_cdecl(arg);
-    CHK_DBL_NEQ(result, 0.0);
-    CHK_DBL_EQ(ceil_cdecl_arg, arg);
-    CHK_DBL_EQ(ceil_cdecl_result, result);
-    CHK_DBL_EQ(ceil_result, result);
-    CHK_DBL_EQ(ceil_arg, arg);
+int main(int argc, char **argv)
+{
+    double expected_result = strtod("3.7", NULL);
+    enum open_mode open_mode;
 
+    if (argc != 2) {
+        show_usage(argv[0]);
+        exit(1);
+    }
+    if (strcmp(argv[1], "open") == 0) {
+        open_mode = OPEN_MODE_DEFAULT;
+    } else if (strcmp(argv[1], "open_by_handle") == 0) {
+        open_mode = OPEN_MODE_BY_HANDLE;
+    } else if (strcmp(argv[1], "open_by_address") == 0) {
+        open_mode = OPEN_MODE_BY_ADDRESS;
+    } else {
+        show_usage(argv[0]);
+        exit(1);
+    }
+
+    /* Resolve the function addreses by lazy binding. */
+    strtod_cdecl("3.7", NULL);
 #if defined _WIN32 || defined __CYGWIN__
-    arg = 5.3;
-    result = ceil_stdcall(arg);
-    CHK_DBL_NEQ(result, 0.0);
-    CHK_DBL_EQ(ceil_stdcall_arg, arg);
-    CHK_DBL_EQ(ceil_stdcall_result, result);
-    CHK_DBL_EQ(ceil_result, result);
-    CHK_DBL_EQ(ceil_arg, arg);
-
-    arg = 8.8;
-    result = ceil_fastcall(arg);
-    CHK_DBL_NEQ(result, 0.0);
-    CHK_DBL_EQ(ceil_fastcall_arg, arg);
-    CHK_DBL_EQ(ceil_fastcall_result, result);
-    CHK_DBL_EQ(ceil_result, result);
-    CHK_DBL_EQ(ceil_arg, arg);
+    strtod_stdcall("3.7", NULL);
+    strtod_fastcall("3.7", NULL);
+#endif
+#if defined _WIN32
+    strtod_export_by_ordinal("3.7", NULL);
 #endif
 
+    hook_function_calls_in_executable(open_mode);
+    hook_function_calls_in_library(open_mode);
+
+    CHK_RESULT(strtod_cdecl, "3.7", expected_result);
+#if defined _WIN32 || defined __CYGWIN__
+    CHK_RESULT(strtod_stdcall, "3.7", expected_result);
+    CHK_RESULT(strtod_fastcall, "3.7", expected_result);
+#endif
 #if defined _WIN32
-    arg = 10.7;
-    result = ceil_export_by_ordinal(arg);
-    CHK_DBL_NEQ(result, 0.0);
-    CHK_DBL_EQ(ceil_export_by_ordinal_arg, arg);
-    CHK_DBL_EQ(ceil_export_by_ordinal_result, result);
-    CHK_DBL_EQ(ceil_result, result);
-    CHK_DBL_EQ(ceil_arg, arg);
+    CHK_RESULT(strtod_export_by_ordinal, "3.7", expected_result);
 #endif
 
     printf("success\n");

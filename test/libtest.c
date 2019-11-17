@@ -1,24 +1,24 @@
-#include <math.h>
+#include <stdlib.h>
 #include "libtest.h"
 
-double ceil_cdecl(double x)
+double strtod_cdecl(const char *str, char **endptr)
 {
-    return ceil(x);
+    return strtod(str, endptr);
 }
 
 #if defined _WIN32 || defined __CYGWIN__
-double __stdcall ceil_stdcall(double x)
+double __stdcall strtod_stdcall(const char *str, char **endptr)
 {
-    return ceil(x);
+    return strtod(str, endptr);
 }
 
-double __fastcall ceil_fastcall(double x)
+double __fastcall strtod_fastcall(const char *str, char **endptr)
 {
-    return ceil(x);
+    return strtod(str, endptr);
 }
 
-double ceil_export_by_ordinal(double x)
+double strtod_export_by_ordinal(const char *str, char **endptr)
 {
-    return ceil(x);
+    return strtod(str, endptr);
 }
 #endif
