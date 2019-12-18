@@ -1,12 +1,13 @@
-
+DLL_CFLAGS = /LD /MD
+EXE_CFLAGS = /MD
 
 all: libtest.dll testprog.exe
 
 libtest.dll: libtest.c libtest.h
-	cl /nologo /LD /MD /DLIBTEST_DLL /Felibtest.dll libtest.c /link /def:libtest.def
+	cl /nologo $(DLL_CFLAGS) /DLIBTEST_DLL /Felibtest.dll libtest.c /link /def:libtest.def
 
 testprog.exe: testprog.c ../plthook_win32.c libtest.h
-	cl /nologo /MD /Fetestprog -I.. testprog.c ..\plthook_win32.c libtest.lib
+	cl /nologo $(EXE_CFLAGS) /Fetestprog -I.. testprog.c ..\plthook_win32.c libtest.lib
 
 check: libtest.dll testprog.exe
 	.\testprog.exe open
