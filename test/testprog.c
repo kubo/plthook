@@ -10,6 +10,10 @@
 #include <dlfcn.h>
 #endif
 
+#if defined __UCLIBC__ && !defined RTLD_NOLOAD
+#define RTLD_NOLOAD 0
+#endif
+
 #define CHK_PH(func) do { \
     if (func != 0) { \
         fprintf(stderr, "%s error: %s\n", #func, plthook_error()); \
