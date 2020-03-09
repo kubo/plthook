@@ -10,6 +10,10 @@
 #include <dlfcn.h>
 #endif
 
+#if defined __UCLIBC__ && !defined RTLD_NOLOAD
+#define RTLD_NOLOAD 0
+#endif
+
 #define CHK_PH(func) do { \
     if (func != 0) { \
         fprintf(stderr, "%s error: %s\n", #func, plthook_error()); \
@@ -206,7 +210,7 @@ static void test_plthook_enum(plthook_t *plthook, enum_test_data_t *test_data)
 
 static void show_usage(const char *arg0)
 {
-    fprintf(stderr, "Usage: %s (open | open_by_handle)\n", arg0);
+    fprintf(stderr, "Usage: %s (open | open_by_handle | open_by_address)\n", arg0);
 }
 
 static void hook_function_calls_in_executable(enum open_mode open_mode)
