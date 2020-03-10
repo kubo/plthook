@@ -96,9 +96,9 @@ matrix:
       os: windows
       script:
         - cd test
-        - cmd.exe /c 'run-test.bat amd64 "/LD /MD" "/MD"'
-        - cmd.exe /c 'run-test.bat x86 "/LD /MD" "/MD"'
-        - cmd.exe /c 'run-test.bat amd64 "/LD /MD /O2" "/MD /O2"'
-        - cmd.exe /c 'run-test.bat x86 "/LD /MD /O2" "/MD /O2"'
-        - cmd.exe /c 'run-test.bat amd64 "/LDd /MDd" "/MDd"'
-        - cmd.exe /c 'run-test.bat x86 "/LDd /MDd" "/MDd"'
+        - ./run-test.bat amd64  "-LD -MD"     "-MD"
+        - ./run-test.bat x86    "-LD -MD"     "-MD"
+        - ./run-test.bat amd64  "-LD -MD -O2" "-MD -O2"
+        - ./run-test.bat x86    "-LD -MD -O2" "-MD -O2"
+        - ./run-test.bat amd64  "-LDd -MDd"   "-MDd"
+        - ./run-test.bat x86    "-LDd -MDd"   "-MDd"
