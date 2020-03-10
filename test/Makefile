@@ -12,14 +12,14 @@ SOEXT = so
 LIBS = -ldl -lm
 PLTHOOK_C = plthook_elf.c
 TESTS = run_tests
-QEMU_CMD =
+KICK_CMD =
 
 ifeq ($(UNAME_S),Linux)
   # Linux
   TESTS = relro_pie_tests
   ifneq ($(TARGET_PLATFORM),)
     CC = $(TARGET_PLATFORM)-gcc
-    QEMU_CMD = qemu-$(or $(QEMU_ARCH),$(shell echo $(TARGET_PLATFORM) | sed -e 's/-.*//')) -L /usr/$(TARGET_PLATFORM)
+    KICK_CMD = qemu-$(or $(QEMU_ARCH),$(shell echo $(TARGET_PLATFORM) | sed -e 's/-.*//')) -L /usr/$(TARGET_PLATFORM)
   endif
 endif
 
@@ -64,9 +64,9 @@ testprog$(EXEEXT): testprog.c ../$(PLTHOOK_C) libtest.h
 	$(CC) $(CFLAGS_EXE) $(CFLAGS) -o testprog$(EXEEXT) -I.. testprog.c ../$(PLTHOOK_C) -L. -ltest $(LIBS)
 
 run_tests: clean libtest.$(SOEXT) testprog$(EXEEXT)
-	LD_LIBRARY_PATH=. $(QEMU_CMD) ./testprog$(EXEEXT) open
-	LD_LIBRARY_PATH=. $(QEMU_CMD) ./testprog$(EXEEXT) open_by_handle
-	test "$(SKIP_OPEN_BY_ADDRESS_TEST)" || env LD_LIBRARY_PATH=. $(QEMU_CMD) ./testprog$(EXEEXT) open_by_address
+	LD_LIBRARY_PATH=. $(KICK_CMD) ./testprog$(EXEEXT) open
+	LD_LIBRARY_PATH=. $(KICK_CMD) ./testprog$(EXEEXT) open_by_handle
+	test "$(SKIP_OPEN_BY_ADDRESS_TEST)" || env LD_LIBRARY_PATH=. $(KICK_CMD) ./testprog$(EXEEXT) open_by_address
 
 check: $(TESTS)
 
@@ -103,13 +103,13 @@ relro_pie_m32_tests:
 
 relro_pie_tests_on_valgrind:
 	@echo ------------ check on valgrind ------------
-	$(MAKE) run_tests "EXTRA_CFLAGS=" QEMU_CMD=valgrind
+	$(MAKE) run_tests "EXTRA_CFLAGS=" KICK_CMD=valgrind
 	@echo ------------ check Full RELRO on valgrind  ------------
-	$(MAKE) run_tests "EXTRA_CFLAGS=-Wl,-z,relro,-z,now" QEMU_CMD=valgrind
+	$(MAKE) run_tests "EXTRA_CFLAGS=-Wl,-z,relro,-z,now" KICK_CMD=valgrind
 	@echo ------------ check 32-bit on valgrind ------------
-	$(MAKE) run_tests "EXTRA_CFLAGS=-m32" QEMU_CMD=valgrind
+	$(MAKE) run_tests "EXTRA_CFLAGS=-m32" KICK_CMD=valgrind
 	@echo ------------ check 32-bit Full RELRO on valgrind ------------
-	$(MAKE) run_tests "EXTRA_CFLAGS=-m32 -Wl,-z,relro,-z,now" QEMU_CMD=valgrind
+	$(MAKE) run_tests "EXTRA_CFLAGS=-m32 -Wl,-z,relro,-z,now" KICK_CMD=valgrind
 
 clean:
 	$(RM) libtest.$(SOEXT) testprog$(EXEEXT)
