@@ -250,17 +250,25 @@ int plthook_open(plthook_t **plthook_out, const char *filename)
 int plthook_open_by_handle(plthook_t **plthook_out, void *hndl)
 {
 #if defined __ANDROID__ || defined __UCLIBC__
-    char *addr;
+    const static char *symbols[] = {
+        "__INIT_ARRAY__",
+        "_end",
+        "_start"
+    };
+    size_t i;
 
     if (hndl == NULL) {
         set_errmsg("NULL handle");
         return PLTHOOK_FILE_NOT_FOUND;
     }
-    addr = dlsym(hndl, "__INIT_ARRAY__");
-    if (addr == NULL) {
-        addr = dlsym(hndl, "_end");
+    for (i = 0; i < sizeof(symbols)/sizeof(symbols[0]); i++) {
+        char *addr = dlsym(hndl, symbols[i]);
+        if (addr != NULL) {
+            return plthook_open_by_address(plthook_out, addr - 1);
+        }
     }
-    return plthook_open_by_address(plthook_out, addr - 1);
+    set_errmsg("Could not find an address in the specified handle.");
+    return PLTHOOK_INTERNAL_ERROR;
 #else
     struct link_map *lmap = NULL;
 
