@@ -8,10 +8,11 @@ What is plthook.
 
 A utility library to hook library function calls issued by
 specified object files (executable and libraries). This modifies
-PLT (Procedure Linkage Table) entries in ELF format used on most Unixes
+PLT (Procedure Linkage Table) entries in [ELF][] format used on most Unixes
 or [IAT (Import Address Table)][IAT] entries in PE format used on Windows.
 
 [IAT]: https://en.wikipedia.org/wiki/Portable_Executable#Import_Table
+[ELF]: https://en.wikipedia.org/wiki/Executable_and_Linkable_Format
 
 ### What is PLT (or IAT)
 
@@ -208,24 +209,25 @@ void print_plt_entries(const char *filename)
 Supported Platforms
 -------------------
 
-| Platform | source file |
-| -------- | ----------- |
-| Linux i386 and x86_64 | plthook_elf.c |
-| Linux arm, aarch64, powerpc and powerpc64le (*1) | plthook_elf.c |
-| Windows 32-bit and x64 (MSVC, Mingw32 and Cygwin) | plthook_win32.c |
-| macOS | plthook_osx.c
-| Solaris x86_64 | plthook_elf.c |
-| FreeBSD i386 and x86_64 except i386 program on x86_64 OS | plthook_elf.c |
-| Android(*2) | plthook_elf.c |
+| Platform | source file | status |
+| -------- | ----------- | ------ |
+| Linux i386 and x86_64 | plthook_elf.c | tested on [travis-ci][] |
+| Linux arm, aarch64, powerpc and powerpc64le | plthook_elf.c | tested on [QENU][] on [travis-ci][] |
+| Windows 32-bit and x64 (MSVC, Mingw32 and Cygwin) | plthook_win32.c | tested on [travis-ci][] |
+| macOS | plthook_osx.c | tested on [travis-ci][] |
+| Solaris x86_64 | plthook_elf.c | perhaps(*1) |
+| FreeBSD i386 and x86_64 except i386 program on x86_64 OS | plthook_elf.c | perhaps(*1) |
+| Android(*2) | plthook_elf.c | perhaps(*3) |
 
-*1 These are tested on [QEMU][], which version must be 2.2 or later, user-mode emulation.  
-*2 Contributed by [Daniel Deptford][].
+*1 Tested on a local VM before.  
+*2 Contributed by [Daniel Deptford][].  
+*3 Tested on [travis-ci][] before.  
 
 [QEMU]: http://www.qemu.org/
-[ELF]: https://en.wikipedia.org/wiki/Executable_and_Linkable_Format
 [Daniel Deptford]: https://github.com/redmercury
 [JC Liang]: https://github.com/tntljc
 [#10]: https://github.com/kubo/plthook/pull/10
+[travis-ci]: https://travis-ci.com/kubo/plthook
 
 License
 -------

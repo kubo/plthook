@@ -59,9 +59,9 @@ matrix:
         - make relro_pie_tests TARGET_PLATFORM=aarch64-linux-gnu
         - make relro_pie_tests TARGET_PLATFORM=powerpc-linux-gnu QEMU_ARCH=ppc
         - make relro_pie_tests TARGET_PLATFORM=powerpc64le-linux-gnu QEMU_ARCH=ppc64le
-    - name: macOS 10.14 Mojave (The latest supported by travis)
+    - name: macOS 10.15.7 Catalina (The latest supported by travis)
       os: osx
-      osx_image: xcode11.2
+      osx_image: xcode12.2
       script:
         - cd test
         - make run_tests
@@ -87,16 +87,16 @@ matrix:
         - export OPT_CFLAGS=-O3
         - make run_tests
         - make run_tests EXTRA_CFLAGS=-m32
-    - name: Android arm64 and armeabi
-      language: android
-      android:
-        components:
-          - sys-img-arm64-v8a-google_apis-25
-          - sys-img-armeabi-v7a-google_apis-25
-          #- sys-img-x86_64-google_apis-25
-          #- sys-img-x86-google_apis-25
-      script:
-        - ./test/android/run_tests
+    # - name: Android arm64 and armeabi
+    #   language: android
+    #   android:
+    #     components:
+    #       - sys-img-arm64-v8a-google_apis-25
+    #       - sys-img-armeabi-v7a-google_apis-25
+    #       - sys-img-x86_64-google_apis-25
+    #       - sys-img-x86-google_apis-25
+    #   script:
+    #     - ./test/android/run_tests
     - name: Windows
       os: windows
       script:
