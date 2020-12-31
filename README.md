@@ -1,7 +1,7 @@
 PLTHook
 =======
 
-[![Build Status](https://travis-ci.org/kubo/plthook.svg?branch=master)](https://travis-ci.org/kubo/plthook)
+[![Build Status](https://travis-ci.com/kubo/plthook.svg?branch=master)](https://travis-ci.com/kubo/plthook)
 
 What is plthook.
 ----------------
