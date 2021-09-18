@@ -60,7 +60,7 @@ void plthook_close(plthook_t *plthook);
 const char *plthook_error(void);
 
 #ifdef __cplusplus
-}; /* extern "C" */
+} /* extern "C" */
 #endif
 
 #endif
