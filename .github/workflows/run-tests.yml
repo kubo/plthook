@@ -1,0 +1,166 @@
+name: tests
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      tests_on_ubuntu:
+        description: 'Tests on Ubuntu (true or false)'
+        required: true
+        default: true
+      tests_on_qemu:
+        description: 'Tests on Qemu (true or false)'
+        required: true
+        default: true
+      tests_on_macos:
+        description: 'Tests on macOS (true or false)'
+        required: true
+        default: true
+      tests_on_windows:
+        description: 'Tests on Windows (true or false)'
+        required: true
+        default: true
+
+jobs:
+  tests_on_ubuntu:
+    name: Tests on Ubuntu (x86_64 and i686)
+    if: github.event.inputs.tests_on_ubuntu == 'true' || github.event.inputs.tests_on_ubuntu == ''
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: test
+    steps:
+    - uses: actions/checkout@v2
+    - name: Install packages
+      run: |
+        sudo apt install -y gcc-multilib libc6-dbg valgrind
+        sudo dpkg --add-architecture i386
+        sudo apt update
+        sudo apt install -y libc6-dbg:i386
+    - name: x86_64 without optimization
+      run: |
+        make relro_pie_tests
+    - name: i686 without optimization
+      run: |
+        make relro_pie_m32_tests
+    - name: x86_64 on valgrind without optimization
+      run: |
+        make relro_pie_tests_on_valgrind
+    - name: uclibc x86_64 without optimization
+      run: |
+        ./uclibc-test.sh x86_64
+    - name: uclibc i686 without optimization
+      run: |
+        ./uclibc-test.sh i686
+    - name: set OPT_CLFAGS
+      run: |
+        echo OPT_CFLAGS=-O3 >> $GITHUB_ENV
+    - name: x86_64 with optimization
+      run: |
+        make relro_pie_tests
+    - name: i686 with optimization
+      run: |
+        make relro_pie_m32_tests
+    - name: x86_64 on valgrind with optimization
+      run: |
+        make relro_pie_tests_on_valgrind
+    - name: uclib x86_64 with optimization
+      run: |
+        ./uclibc-test.sh x86_64
+    - name: uclibc i686 with optimization
+      run: |
+        ./uclibc-test.sh i686
+
+  tests_on_qemu:
+    name: Tests on Qemu (arm, armhf, arm64, ppc and ppc64le)
+    if: github.event.inputs.tests_on_qemu == 'true' || github.event.inputs.tests_on_qemu == ''
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: test
+    steps:
+    - uses: actions/checkout@v2
+    - name: Install packages
+      run: |
+        sudo apt install -y qemu-user gcc-arm-linux-gnueabi gcc-arm-linux-gnueabihf gcc-aarch64-linux-gnu gcc-powerpc-linux-gnu gcc-powerpc64le-linux-gnu libc6-dev-armhf-cross libc6-dev-ppc64el-cross libc6-dev-powerpc-cross libc6-dev-armel-cross libc6-dev-arm64-cross
+    - name: arm-linux-gnueabi without optimization
+      run: |
+        make relro_pie_tests TARGET_PLATFORM=arm-linux-gnueabi
+    - name: arm-linux-gnueabihf without optimization
+      run: |
+        make relro_pie_tests TARGET_PLATFORM=arm-linux-gnueabihf
+    - name: aarch64-linux-gnu without optimization
+      run: |
+        make relro_pie_tests TARGET_PLATFORM=aarch64-linux-gnu
+    - name: powerpc-linux-gnu without optimization
+      run: |
+        make relro_pie_tests TARGET_PLATFORM=powerpc-linux-gnu QEMU_ARCH=ppc
+    - name: powerpc64le-linux-gnu without optimization
+      run: |
+        make relro_pie_tests TARGET_PLATFORM=powerpc64le-linux-gnu QEMU_ARCH=ppc64le
+    - name: set OPT_CLFAGS
+      run: |
+        echo OPT_CFLAGS=-O3 >> $GITHUB_ENV
+    - name: arm-linux-gnueabi with optimization
+      run: |
+        make relro_pie_tests TARGET_PLATFORM=arm-linux-gnueabi
+    - name: arm-linux-gnueabihf with optimization
+      run: |
+        make relro_pie_tests TARGET_PLATFORM=arm-linux-gnueabihf
+    - name: aarch64-linux-gnu with optimization
+      run: |
+        make relro_pie_tests TARGET_PLATFORM=aarch64-linux-gnu
+    - name: powerpc-linux-gnu with optimization
+      run: |
+        make relro_pie_tests TARGET_PLATFORM=powerpc-linux-gnu QEMU_ARCH=ppc
+    - name: powerpc64le-linux-gnu with optimization
+      run: |
+        make relro_pie_tests TARGET_PLATFORM=powerpc64le-linux-gnu QEMU_ARCH=ppc64le
+
+  tests_on_macos:
+    name: Tests on macOS (x86_64)
+    if: github.event.inputs.tests_on_macos == 'true' || github.event.inputs.tests_on_macos == ''
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: test
+    steps:
+    - uses: actions/checkout@v2
+    - name: x86_64 without optimization
+      run: |
+        make run_tests
+    - name: set OPT_CLFAGS
+      run: |
+        echo OPT_CFLAGS=-O3 >> $GITHUB_ENV
+    - name: x86_64 with optimization
+      run: |
+        make run_tests
+
+  tests_on_windows:
+    name: Tests on Windows (x64 and x86)
+    if: github.event.inputs.tests_on_windows == 'true' || github.event.inputs.tests_on_windows == ''
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: cmd
+        working-directory: test
+    steps:
+    - uses: actions/checkout@v2
+    - name: x64 without optimization
+      run: |
+        run-test.bat amd64  "-LD -MD"     "-MD"
+    - name: x86 without optimization
+      run: |
+        run-test.bat x86    "-LD -MD"     "-MD"
+    - name: x64 with optimization
+      run: |
+        run-test.bat amd64  "-LD -MD -O2" "-MD -O2"
+    - name: x86 with optimization
+      run: |
+        run-test.bat x86    "-LD -MD -O2" "-MD -O2"
+    - name: x64 with debug
+      run: |
+        run-test.bat amd64  "-LDd -MDd"   "-MDd"
+    - name: x86 with debug
+      run: |
+        run-test.bat x86    "-LDd -MDd"   "-MDd"
