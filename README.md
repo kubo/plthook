@@ -1,7 +1,7 @@
 PLTHook
 =======
 
-[![Build Status](https://travis-ci.com/kubo/plthook.svg?branch=master)](https://travis-ci.com/kubo/plthook)
+[![tests](https://github.com/kubo/plthook/actions/workflows/run-tests.yml/badge.svg)](https://github.com/kubo/plthook/actions/workflows/run-tests.yml)
 
 What is plthook.
 ----------------
@@ -211,23 +211,24 @@ Supported Platforms
 
 | Platform | source file | status |
 | -------- | ----------- | ------ |
-| Linux i386 and x86_64 | plthook_elf.c | tested on [travis-ci][] |
-| Linux arm, aarch64, powerpc and powerpc64le | plthook_elf.c | tested on [QENU][] on [travis-ci][] |
-| Windows 32-bit and x64 (MSVC, Mingw32 and Cygwin) | plthook_win32.c | tested on [travis-ci][] |
-| macOS | plthook_osx.c | tested on [travis-ci][] |
+| Linux i386 and x86_64 | plthook_elf.c | tested using [github actions] |
+| Linux arm, aarch64, powerpc and powerpc64le | plthook_elf.c | tested on [QENU][] using [github actions] |
+| Windows 32-bit and x64 (MSVC) | plthook_win32.c | tested using [github actions] |
+| macOS | plthook_osx.c | tested using [github actions] |
+| Windows 32-bit and x64 (Mingw32 and Cygwin) | plthook_win32.c | perhaps(*2) |
 | Solaris x86_64 | plthook_elf.c | perhaps(*1) |
 | FreeBSD i386 and x86_64 except i386 program on x86_64 OS | plthook_elf.c | perhaps(*1) |
-| Android(*2) | plthook_elf.c | perhaps(*3) |
+| Android(*3) | plthook_elf.c | perhaps(*2) |
 
 *1 Tested on a local VM before.  
-*2 Contributed by [Daniel Deptford][].  
-*3 Tested on [travis-ci][] before.  
+*2 Tested on travis-ci.org before.  
+*3 Contributed by [Daniel Deptford][].  
 
 [QEMU]: http://www.qemu.org/
 [Daniel Deptford]: https://github.com/redmercury
 [JC Liang]: https://github.com/tntljc
 [#10]: https://github.com/kubo/plthook/pull/10
-[travis-ci]: https://travis-ci.com/kubo/plthook
+[github actions]: https://github.com/kubo/plthook/actions/workflows/run-tests.yml
 
 License
 -------
