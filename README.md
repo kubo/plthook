@@ -88,7 +88,7 @@ object files. It now do it only for full RELRO object files.
 Note that plthook before 2017-10-01 gets segmentation fault while
 hooking a [prelinked file](https://en.wikipedia.org/wiki/Prelink#Linux) on Linux.
 
-**2017-09-18:** Fixed for processes on [valgrind](valgrind.org/) on Linux.
+**2017-09-18:** Fixed for processes on [valgrind](https://valgrind.org) on Linux.
 
 Usage
 -----
