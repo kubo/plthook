@@ -413,7 +413,7 @@ static int get_memory_permission(void *address)
         } else {
             /* The fgets reads from the middle of a line. */
             if (eol) {
-                /* The next fgets reads from the beginnig of a line. */
+                /* The next fgets reads from the beginning of a line. */
                 bol = 1;
             }
             continue;
