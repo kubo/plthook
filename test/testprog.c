@@ -311,7 +311,7 @@ int main(int argc, char **argv)
         exit(1);
     }
 
-    /* Resolve the function addreses by lazy binding. */
+    /* Resolve the function addresses by lazy binding. */
     strtod_cdecl("3.7", NULL);
 #if defined _WIN32 || defined __CYGWIN__
     strtod_stdcall("3.7", NULL);

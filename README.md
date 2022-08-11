@@ -163,7 +163,7 @@ int install_hook_function()
     }
 #ifndef WIN32
     // The address passed to the fourth argument of plthook_replace() is
-    // availabe on Windows. But not on Unixes. Get the real address by dlsym().
+    // available on Windows. But not on Unixes. Get the real address by dlsym().
     recv_func = (ssize_t (*)(int, void *, size_t, int))dlsym(RTLD_DEFAULT, "recv");
 #endif
     plthook_close(plthook);
