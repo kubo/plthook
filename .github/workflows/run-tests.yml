@@ -146,6 +146,7 @@ jobs:
         working-directory: test
     steps:
     - uses: actions/checkout@v2
+    - uses: ilammy/msvc-dev-cmd@v1
     - name: x64 without optimization
       run: |
         run-test.bat amd64  "-LD -MD"     "-MD"
