@@ -212,9 +212,10 @@ Supported Platforms
 | Platform | source file | status |
 | -------- | ----------- | ------ |
 | Linux i386 and x86_64 | plthook_elf.c | tested using [github actions] |
-| Linux arm, aarch64, powerpc and powerpc64le | plthook_elf.c | tested on [QENU][] using [github actions] |
+| Linux arm, aarch64, powerpc and powerpc64le | plthook_elf.c | tested on [QEMU][] using [github actions] |
 | Windows 32-bit and x64 (MSVC) | plthook_win32.c | tested using [github actions] |
-| macOS | plthook_osx.c | tested using [github actions] |
+| macOS (intel) | plthook_osx.c | tested using [github actions] |
+| macOS (arm) | plthook_osx.c | (*4) |
 | Windows 32-bit and x64 (Mingw32 and Cygwin) | plthook_win32.c | perhaps(*2) |
 | Solaris x86_64 | plthook_elf.c | perhaps(*1) |
 | FreeBSD i386 and x86_64 except i386 program on x86_64 OS | plthook_elf.c | perhaps(*1) |
@@ -223,6 +224,7 @@ Supported Platforms
 *1 Tested on a local VM before.  
 *2 Tested on travis-ci.org before.  
 *3 Contributed by [Daniel Deptford][].  
+*4 Probably on macOS 11 Big Sur or before. Perhaps on macOS 12 Monterey.  
 
 [QEMU]: http://www.qemu.org/
 [Daniel Deptford]: https://github.com/redmercury

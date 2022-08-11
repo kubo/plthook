@@ -22,3 +22,11 @@ double strtod_export_by_ordinal(const char *str, char **endptr)
     return strtod(str, endptr);
 }
 #endif
+
+#if defined __APPLE__
+int atoi_dummy(const char *str)
+{
+    /* Just to avoid to put "strtod" at the beginning of GOT. */
+    return atoi(str);
+}
+#endif

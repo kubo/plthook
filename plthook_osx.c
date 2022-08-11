@@ -37,18 +37,31 @@
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include <inttypes.h>
 #include <dlfcn.h>
+#include <errno.h>
 #include <mach-o/dyld.h>
+#ifdef LC_DYLD_CHAINED_FIXUPS
+#include <sys/mman.h>
+#include <mach-o/fixup-chains.h>
+#endif
 #include "plthook.h"
 
 // #define PLTHOOK_DEBUG_CMD 1
 // #define PLTHOOK_DEBUG_BIND 1
+// #define PLTHOOK_DEBUG_FIXUPS 1
 
 #ifdef PLTHOOK_DEBUG_CMD
 #define DEBUG_CMD(...) fprintf(stderr, __VA_ARGS__)
 #else
 #define DEBUG_CMD(...)
+#endif
+
+#ifdef PLTHOOK_DEBUG_FIXUPS
+#define DEBUG_FIXUPS(...) fprintf(stderr, __VA_ARGS__)
+#else
+#define DEBUG_FIXUPS(...)
 #endif
 
 #ifdef PLTHOOK_DEBUG_BIND
@@ -70,7 +83,10 @@ typedef struct {
 
 struct plthook {
     unsigned int num_entries;
-    bind_address_t entries[1];
+#ifdef LC_DYLD_CHAINED_FIXUPS
+    int readonly_segment;
+#endif
+    bind_address_t entries[1]; /* This must be the last. */
 };
 
 #define MAX_SEGMENTS 8
@@ -81,11 +97,18 @@ typedef struct {
     int num_segments;
     int linkedit_segment_idx;
     struct segment_command_ *segments[MAX_SEGMENTS];
+#ifdef LC_DYLD_CHAINED_FIXUPS
+    struct linkedit_data_command *chained_fixups;
+    size_t got_addr;
+#endif
 } data_t;
 
 static int plthook_open_real(plthook_t **plthook_out, uint32_t image_idx, const struct mach_header *mh, const char *image_name);
 static unsigned int set_bind_addrs(data_t *d, uint32_t lazy_bind_off, uint32_t lazy_bind_size);
 static void set_bind_addr(data_t *d, unsigned int *idx, const char *sym_name, int seg_index, int seg_offset);
+#ifdef LC_DYLD_CHAINED_FIXUPS
+static int read_chained_fixups(data_t *d, const struct mach_header *mh, const char *image_name);
+#endif
 
 static void set_errmsg(const char *fmt, ...) __attribute__((__format__ (__printf__, 1, 2)));
 
@@ -284,6 +307,44 @@ static int plthook_open_real(plthook_t **plthook_out, uint32_t image_idx, const 
             if (strcmp(segment64->segname, "__LINKEDIT") == 0) {
                 data.linkedit_segment_idx = data.num_segments;
             }
+#ifdef LC_DYLD_CHAINED_FIXUPS
+            if (strcmp(segment64->segname, "__DATA_CONST") == 0) {
+                struct section_64 *sec = (struct section_64 *)(segment64 + 1);
+                uint32_t i;
+                for (i = 0; i < segment64->nsects; i++) {
+                    DEBUG_CMD("  section_64 (%u)\n"
+                              "      sectname  %s\n"
+                              "      segname   %s\n"
+                              "      addr      0x%llx\n"
+                              "      size      0x%llx\n"
+                              "      offset    0x%x\n"
+                              "      align     0x%x\n"
+                              "      reloff    0x%x\n"
+                              "      nreloc    %d\n"
+                              "      flags     0x%x\n"
+                              "      reserved1 %d\n"
+                              "      reserved2 %d\n"
+                              "      reserved3 %d\n",
+                              i,
+                              sec->sectname,
+                              sec->segname,
+                              sec->addr,
+                              sec->size,
+                              sec->offset,
+                              sec->align,
+                              sec->reloff,
+                              sec->nreloc,
+                              sec->flags,
+                              sec->reserved1,
+                              sec->reserved2,
+                              sec->reserved3);
+                    if (strcmp(sec->segname, "__DATA_CONST") == 0 && strcmp(sec->sectname, "__got") == 0) {
+                        data.got_addr = sec->addr + data.slide;
+                    }
+                    sec++;
+                }
+            }
+#endif
             if (data.num_segments == MAX_SEGMENTS) {
                 set_errmsg("Too many segments: %s", image_name);
                 return PLTHOOK_INTERNAL_ERROR;
@@ -347,6 +408,29 @@ static int plthook_open_real(plthook_t **plthook_out, uint32_t image_idx, const 
         case LC_DYLIB_CODE_SIGN_DRS: /* 0x2B */
             DEBUG_CMD("LC_DYLIB_CODE_SIGN_DRS\n");
             break;
+#ifdef LC_BUILD_VERSION
+        case LC_BUILD_VERSION: /* 0x32 */
+            DEBUG_CMD("LC_BUILD_VERSION\n");
+            break;
+#endif
+#ifdef LC_DYLD_EXPORTS_TRIE
+        case LC_DYLD_EXPORTS_TRIE: /* (0x33|LC_REQ_DYLD) */
+            DEBUG_CMD("LC_DYLD_EXPORTS_TRIE\n");
+            break;
+#endif
+#ifdef LC_DYLD_CHAINED_FIXUPS
+        case LC_DYLD_CHAINED_FIXUPS: /* (0x34|LC_REQ_DYLD) */
+            data.chained_fixups = (struct linkedit_data_command *)cmd;
+            DEBUG_CMD("LC_DYLD_CHAINED_FIXUPS\n"
+                      "  cmdsize   %u\n"
+                      "  dataoff   %u (0x%x)\n"
+                      "  datasize  %u\n",
+                      data.chained_fixups->cmdsize,
+                      data.chained_fixups->dataoff,
+                      data.chained_fixups->dataoff,
+                      data.chained_fixups->datasize);
+            break;
+#endif
         default:
             DEBUG_CMD("LC_? (0x%x)\n", cmd->cmd);
         }
@@ -356,15 +440,26 @@ static int plthook_open_real(plthook_t **plthook_out, uint32_t image_idx, const 
         set_errmsg("Cannot find the linkedit segment: %s", image_name);
         return PLTHOOK_INVALID_FILE_FORMAT;
     }
-    nbind = set_bind_addrs(&data, lazy_bind_off, lazy_bind_size);
-    size = offsetof(plthook_t, entries) + sizeof(bind_address_t) * nbind;
-    data.plthook = (plthook_t*)malloc(size);
-    if (data.plthook == NULL) {
-        set_errmsg("failed to allocate memory: %" PRIuPTR " bytes", size);
-        return PLTHOOK_OUT_OF_MEMORY;
+#ifdef LC_DYLD_CHAINED_FIXUPS
+    if (data.chained_fixups != NULL) {
+        int rv = read_chained_fixups(&data, mh, image_name);
+        if (rv != 0) {
+            return rv;
+        }
+    } else {
+#endif
+        nbind = set_bind_addrs(&data, lazy_bind_off, lazy_bind_size);
+        size = offsetof(plthook_t, entries) + sizeof(bind_address_t) * nbind;
+        data.plthook = (plthook_t*)calloc(1, size);
+        if (data.plthook == NULL) {
+            set_errmsg("failed to allocate memory: %" PRIuPTR " bytes", size);
+            return PLTHOOK_OUT_OF_MEMORY;
+        }
+        data.plthook->num_entries = nbind;
+        set_bind_addrs(&data, lazy_bind_off, lazy_bind_size);
+#ifdef LC_DYLD_CHAINED_FIXUPS
     }
-    data.plthook->num_entries = nbind;
-    set_bind_addrs(&data, lazy_bind_off, lazy_bind_size);
+#endif
 
     *plthook_out = data.plthook;
     return 0;
@@ -465,6 +560,225 @@ static void set_bind_addr(data_t *data, unsigned int *idx, const char *sym_name,
     (*idx)++;
 }
 
+#ifdef LC_DYLD_CHAINED_FIXUPS
+static int read_chained_fixups(data_t *d, const struct mach_header *mh, const char *image_name)
+{
+    const uint8_t *ptr = (const uint8_t *)(d->chained_fixups->dataoff + d->slide);
+    const uint8_t *end = ptr + d->chained_fixups->datasize;
+    const struct dyld_chained_fixups_header *header = (const struct dyld_chained_fixups_header *)ptr;
+    const struct dyld_chained_import *import = (const struct dyld_chained_import *)(ptr + header->imports_offset);
+    const struct dyld_chained_import_addend *import_addend = (const struct dyld_chained_import_addend *)(ptr + header->imports_offset);
+    const struct dyld_chained_import_addend64 *import_addend64 = (const struct dyld_chained_import_addend64 *)(ptr + header->imports_offset);
+    const char *symbol_pool = (const char*)ptr + header->symbols_offset;
+    int rv = PLTHOOK_INTERNAL_ERROR;
+    size_t size;
+    uint32_t i;
+#ifdef PLTHOOK_DEBUG_FIXUPS
+    const struct dyld_chained_starts_in_image *starts = (const struct dyld_chained_starts_in_image *)(ptr + header->starts_offset);
+    FILE *fp = NULL;
+#endif
+    if (d->got_addr == 0) {
+        set_errmsg("__got section is not found in %s", image_name);
+        rv = PLTHOOK_INVALID_FILE_FORMAT;
+        goto cleanup;
+    }
+
+    DEBUG_FIXUPS("dyld_chained_fixups_header\n"
+                 "  fixups_version  %u\n"
+                 "  starts_offset   %u\n"
+                 "  imports_offset  %u\n"
+                 "  symbols_offset  %u\n"
+                 "  imports_count   %u\n"
+                 "  imports_format  %u\n"
+                 "  symbols_format  %u\n",
+                 header->fixups_version,
+                 header->starts_offset,
+                 header->imports_offset,
+                 header->symbols_offset,
+                 header->imports_count,
+                 header->imports_format,
+                 header->symbols_format);
+    if (header->fixups_version != 0) {
+        set_errmsg("unknown chained fixups version %u", header->fixups_version);
+        rv = PLTHOOK_INVALID_FILE_FORMAT;
+        goto cleanup;
+    }
+
+    size = offsetof(plthook_t, entries) + sizeof(bind_address_t) * header->imports_count;
+    d->plthook = (plthook_t*)calloc(1, size);
+    if (d->plthook == NULL) {
+        set_errmsg("failed to allocate memory: %" PRIuPTR " bytes", size);
+        rv = PLTHOOK_OUT_OF_MEMORY;
+        goto cleanup;
+    }
+    d->plthook->num_entries = header->imports_count;
+    d->plthook->readonly_segment = 1;
+
+    switch (header->imports_format) {
+    case DYLD_CHAINED_IMPORT:
+        DEBUG_FIXUPS("dyld_chained_import\n");
+        break;
+    case DYLD_CHAINED_IMPORT_ADDEND:
+        DEBUG_FIXUPS("dyld_chained_import_addend\n");
+        break;
+    case DYLD_CHAINED_IMPORT_ADDEND64:
+        DEBUG_FIXUPS("dyld_chained_import_addend64\n");
+        break;
+    default:
+        set_errmsg("unknown imports format %u", header->imports_format);
+        rv = PLTHOOK_INVALID_FILE_FORMAT;
+        goto cleanup;
+    }
+
+    for (i = 0; i < header->imports_count; i++) {
+        struct dyld_chained_import_addend64 imp;
+        switch (header->imports_format) {
+        case DYLD_CHAINED_IMPORT:
+            imp.lib_ordinal = import[i].lib_ordinal;
+            imp.weak_import = import[i].weak_import;
+            imp.name_offset = import[i].name_offset;
+            imp.addend = 0;
+            break;
+        case DYLD_CHAINED_IMPORT_ADDEND:
+            imp.lib_ordinal = import_addend[i].lib_ordinal;
+            imp.weak_import = import_addend[i].weak_import;
+            imp.name_offset = import_addend[i].name_offset;
+            imp.addend = import_addend[i].addend;
+            break;
+        case DYLD_CHAINED_IMPORT_ADDEND64:
+            imp = import_addend64[i];
+            break;
+        }
+        const char *name = symbol_pool + imp.name_offset;
+        if (name > (const char*)end) {
+            DEBUG_FIXUPS("  lib_ordinal %u, weak_import %u, name_offset %u, addend %llu\n",
+                         imp.lib_ordinal, imp.weak_import, imp.name_offset, imp.addend);
+            set_errmsg("invalid symbol name address");
+            rv = PLTHOOK_INVALID_FILE_FORMAT;
+            goto cleanup;
+        }
+        DEBUG_FIXUPS("  lib_ordinal %u, weak_import %u, name_offset %u (%s), addend %llu\n",
+                     imp.lib_ordinal, imp.weak_import, imp.name_offset, name, imp.addend);
+        d->plthook->entries[i].name = name;
+        d->plthook->entries[i].addr = (void**)(d->got_addr + i * sizeof(void*));
+    }
+
+#ifdef PLTHOOK_DEBUG_FIXUPS
+    fp = fopen(image_name, "r");
+    if (fp == NULL) {
+        set_errmsg("failed to open file %s (error: %s)", image_name, strerror(errno));
+        rv = PLTHOOK_FILE_NOT_FOUND;
+        goto cleanup;
+    }
+
+    DEBUG_FIXUPS("dyld_chained_starts_in_image\n"
+                 "  seg_count       %u\n",
+                 starts->seg_count);
+    for (i = 0; i < starts->seg_count; i++) {
+        DEBUG_FIXUPS("  seg_info_offset[%u] %u\n",
+                     i, starts->seg_info_offset[i]);
+        if (starts->seg_info_offset[i] == 0) {
+            continue;
+        }
+        const struct dyld_chained_starts_in_segment* seg = (const struct dyld_chained_starts_in_segment*)((char*)starts + starts->seg_info_offset[i]);
+        uint16_t j;
+        DEBUG_FIXUPS("    dyld_chained_starts_in_segment\n"
+                     "      size              %u\n"
+                     "      page_size         0x%x\n"
+                     "      pointer_format    %u\n"
+                     "      segment_offset    %llu (0x%llx)\n"
+                     "      max_valid_pointer %u\n"
+                     "      page_count        %u\n",
+                     seg->size, seg->page_size, seg->pointer_format, seg->segment_offset, seg->segment_offset, seg->max_valid_pointer, seg->page_count);
+        for (j = 0; j < seg->page_count; j++) {
+            uint16_t index = j;
+            uint16_t break_loop = 1;
+            off_t offset;
+
+            DEBUG_FIXUPS("      page_start[%u]     %u\n", j, seg->page_start[j]);
+            if (seg->page_start[j] == DYLD_CHAINED_PTR_START_NONE) {
+                continue;
+            }
+            if (seg->page_start[j] & DYLD_CHAINED_PTR_START_MULTI) {
+              index = seg->page_start[j] & ~DYLD_CHAINED_PTR_START_MULTI;
+              break_loop = 0;
+            }
+            offset = seg->segment_offset + j * seg->page_size + seg->page_start[index] & ~DYLD_CHAINED_PTR_START_MULTI;
+            while (1) {
+                switch (seg->pointer_format) {
+                case DYLD_CHAINED_PTR_64_OFFSET: {
+                    union {
+                        struct dyld_chained_ptr_64_rebase rebase;
+                        struct dyld_chained_ptr_64_bind bind;
+                    } buf;
+
+                    do {
+                        if (fseeko(fp, offset, SEEK_SET) != 0) {
+                            set_errmsg("failed to seek to %lld in %s", offset, image_name);
+                            rv = PLTHOOK_INVALID_FILE_FORMAT;
+                            goto cleanup;
+                        }
+                        if (fread(&buf, sizeof(buf), 1, fp) != 1) {
+                            set_errmsg("failed to read fixup chain from %s", image_name);
+                            rv = PLTHOOK_INVALID_FILE_FORMAT;
+                            goto cleanup;
+                        }
+                        if (buf.rebase.bind) {
+                            DEBUG_FIXUPS("        dyld_chained_ptr_64_bind\n"
+                                         "          ordinal  %d\n"
+                                         "          addend   %d\n"
+                                         "          reserved %d\n"
+                                         "          next     %d\n"
+                                         "          bind     %d\n",
+                                         buf.bind.ordinal,
+                                         buf.bind.addend,
+                                         buf.bind.reserved,
+                                         buf.bind.next,
+                                         buf.bind.bind);
+                        } else {
+                            DEBUG_FIXUPS("        dyld_chained_ptr_64_rebase\n"
+                                         "          target   %llu\n"
+                                         "          high8    %d\n"
+                                         "          reserved %d\n"
+                                         "          next     %d\n"
+                                         "          bind     %d\n",
+                                         buf.rebase.target,
+                                         buf.rebase.high8,
+                                         buf.rebase.reserved,
+                                         buf.rebase.next,
+                                         buf.rebase.bind);
+                        }
+                        offset += buf.bind.next * 4;
+                    } while (buf.bind.next != 0);
+                    break;
+                }
+                default:
+                    break_loop = 1;
+                    break;
+                }
+                if (break_loop) {
+                    break;
+                }
+                break_loop = seg->page_start[++index] & DYLD_CHAINED_PTR_START_MULTI;
+            } // while (1) */
+        }
+    }
+#endif
+    rv = 0;
+cleanup:
+#ifdef PLTHOOK_DEBUG_FIXUPS
+    if (fp != NULL) {
+        fclose(fp);
+    }
+#endif
+    if (rv != 0 && d->plthook) {
+        free(d->plthook);
+        d->plthook = NULL;
+    }
+    return rv;
+}
+#endif
+
 int plthook_enum(plthook_t *plthook, unsigned int *pos, const char **name_out, void ***addr_out)
 {
     if (*pos >= plthook->num_entries) {
@@ -518,7 +832,22 @@ matched:
         if (oldfunc) {
             *oldfunc = *addr;
         }
-        *addr = funcaddr;
+#ifdef LC_DYLD_CHAINED_FIXUPS
+        if (plthook->readonly_segment) {
+            size_t page_size = sysconf(_SC_PAGESIZE);
+            void *base = (void*)((size_t)addr & ~(page_size - 1));
+            if (mprotect(base, page_size, PROT_READ | PROT_WRITE) != 0) {
+                set_errmsg("Cannot change memory protection at address %p", base);
+                return PLTHOOK_INTERNAL_ERROR;
+            }
+            *addr = funcaddr;
+            mprotect(base, page_size, PROT_READ);
+        } else {
+#endif
+            *addr = funcaddr;
+#ifdef LC_DYLD_CHAINED_FIXUPS
+        }
+#endif
         return 0;
     }
     if (rv == EOF) {
