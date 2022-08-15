@@ -700,11 +700,14 @@ static int read_chained_fixups(data_t *d, const struct mach_header *mh, const ch
                 continue;
             }
             if (seg->page_start[j] & DYLD_CHAINED_PTR_START_MULTI) {
-              index = seg->page_start[j] & ~DYLD_CHAINED_PTR_START_MULTI;
-              break_loop = 0;
+                index = seg->page_start[j] & ~DYLD_CHAINED_PTR_START_MULTI;
+                break_loop = 0;
             }
-            offset = seg->segment_offset + j * seg->page_size + seg->page_start[index] & ~DYLD_CHAINED_PTR_START_MULTI;
             while (1) {
+                if (index != j) {
+                    DEBUG_FIXUPS("      page_start[%u]     %u\n", index, seg->page_start[index]);
+                }
+                offset = seg->segment_offset + j * seg->page_size + (seg->page_start[index] & ~DYLD_CHAINED_PTR_START_MULTI);
                 switch (seg->pointer_format) {
                 case DYLD_CHAINED_PTR_64_OFFSET: {
                     union {
@@ -752,7 +755,138 @@ static int read_chained_fixups(data_t *d, const struct mach_header *mh, const ch
                     } while (buf.bind.next != 0);
                     break;
                 }
+                case DYLD_CHAINED_PTR_ARM64E:
+                case DYLD_CHAINED_PTR_ARM64E_KERNEL:
+                case DYLD_CHAINED_PTR_ARM64E_USERLAND:
+                case DYLD_CHAINED_PTR_ARM64E_USERLAND24: {
+                    // The following code isn't tested.
+                    union {
+                        struct dyld_chained_ptr_arm64e_rebase rebase;
+                        struct dyld_chained_ptr_arm64e_bind bind;
+                        struct dyld_chained_ptr_arm64e_bind24 bind24;
+                        struct dyld_chained_ptr_arm64e_auth_rebase auth_rebase;
+                        struct dyld_chained_ptr_arm64e_auth_bind auth_bind;
+                        struct dyld_chained_ptr_arm64e_auth_bind24 auth_bind24;
+                    } buf;
+
+                    do {
+                        if (fseeko(fp, offset, SEEK_SET) != 0) {
+                            set_errmsg("failed to seek to %lld in %s", offset, image_name);
+                            rv = PLTHOOK_INVALID_FILE_FORMAT;
+                            goto cleanup;
+                        }
+                        if (fread(&buf, sizeof(buf), 1, fp) != 1) {
+                            set_errmsg("failed to read fixup chain from %s", image_name);
+                            rv = PLTHOOK_INVALID_FILE_FORMAT;
+                            goto cleanup;
+                        }
+                        if (!buf.rebase.auth) {
+                            if (!buf.rebase.bind) {
+                                DEBUG_FIXUPS("        dyld_chained_ptr_arm64e_rebase\n"
+                                             "          target    %llu\n"
+                                             "          high8     %d\n"
+                                             "          next      %d\n"
+                                             "          bind      %d\n"  // == 0
+                                             "          auth      %d\n", // == 0
+                                             buf.rebase.target,
+                                             buf.rebase.high8,
+                                             buf.rebase.next,
+                                             buf.rebase.bind,
+                                             buf.rebase.auth);
+                            } else if (seg->pointer_format != DYLD_CHAINED_PTR_ARM64E_USERLAND24) {
+                                DEBUG_FIXUPS("        dyld_chained_ptr_arm64e_bind\n"
+                                             "          ordinal   %d\n"
+                                             "          zero      %d\n"
+                                             "          addend    %d\n"
+                                             "          next      %d\n"
+                                             "          bind      %d\n"  // == 1
+                                             "          auth      %d\n", // == 0
+                                             buf.bind.ordinal,
+                                             buf.bind.zero,
+                                             buf.bind.addend,
+                                             buf.bind.next,
+                                             buf.bind.bind,
+                                             buf.bind.auth);
+                            } else {
+                                DEBUG_FIXUPS("        dyld_chained_ptr_arm64e_bind24\n"
+                                             "          ordinal   %d\n"
+                                             "          zero      %d\n"
+                                             "          addend    %d\n"
+                                             "          next      %d\n"
+                                             "          bind      %d\n"  // == 1
+                                             "          auth      %d\n", // == 0
+                                             buf.bind24.ordinal,
+                                             buf.bind24.zero,
+                                             buf.bind24.addend,
+                                             buf.bind24.next,
+                                             buf.bind24.bind,
+                                             buf.bind24.auth);
+                            }
+                        } else {
+                            if (!buf.rebase.bind) {
+                                DEBUG_FIXUPS("        dyld_chained_ptr_arm64e_auth_rebase\n"
+                                             "          target    %u\n"
+                                             "          diversity %d\n"
+                                             "          addrDiv   %d\n"
+                                             "          key       %d\n"
+                                             "          next      %d\n"
+                                             "          bind      %d\n"  // == 0
+                                             "          auth      %d\n", // == 1
+                                             buf.auth_rebase.target,
+                                             buf.auth_rebase.diversity,
+                                             buf.auth_rebase.addrDiv,
+                                             buf.auth_rebase.key,
+                                             buf.auth_rebase.next,
+                                             buf.auth_rebase.bind,
+                                             buf.auth_rebase.auth);
+                            } else if (seg->pointer_format != DYLD_CHAINED_PTR_ARM64E_USERLAND24) {
+                                DEBUG_FIXUPS("        dyld_chained_ptr_arm64e_auth_bind\n"
+                                             "          ordinal   %d\n"
+                                             "          zero      %d\n"
+                                             "          diversity %d\n"
+                                             "          addrDiv   %d\n"
+                                             "          key       %d\n"
+                                             "          next      %d\n"
+                                             "          bind      %d\n"  // == 1
+                                             "          auth      %d\n", // == 1
+                                             buf.auth_bind.ordinal,
+                                             buf.auth_bind.zero,
+                                             buf.auth_bind.diversity,
+                                             buf.auth_bind.addrDiv,
+                                             buf.auth_bind.key,
+                                             buf.auth_bind.next,
+                                             buf.auth_bind.bind,
+                                             buf.auth_bind.auth);
+                            } else {
+                                DEBUG_FIXUPS("        dyld_chained_ptr_arm64e_auth_bind24\n"
+                                             "          ordinal   %d\n"
+                                             "          zero      %d\n"
+                                             "          diversity %d\n"
+                                             "          addrDiv   %d\n"
+                                             "          key       %d\n"
+                                             "          next      %d\n"
+                                             "          bind      %d\n"  // == 1
+                                             "          auth      %d\n", // == 1
+                                             buf.auth_bind24.ordinal,
+                                             buf.auth_bind24.zero,
+                                             buf.auth_bind24.diversity,
+                                             buf.auth_bind24.addrDiv,
+                                             buf.auth_bind24.key,
+                                             buf.auth_bind24.next,
+                                             buf.auth_bind24.bind,
+                                             buf.auth_bind24.auth);
+                            }
+                        }
+                        if (seg->pointer_format == DYLD_CHAINED_PTR_ARM64E_KERNEL) {
+                            offset += buf.rebase.next * 4;
+                        } else {
+                            offset += buf.rebase.next * 8;
+                        }
+                    } while (buf.rebase.next != 0);
+                    break;
+                }
                 default:
+                    DEBUG_FIXUPS("unsupported pointer_format: %u\n", seg->pointer_format);
                     break_loop = 1;
                     break;
                 }
