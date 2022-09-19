@@ -51,6 +51,7 @@
 // #define PLTHOOK_DEBUG_CMD 1
 // #define PLTHOOK_DEBUG_BIND 1
 // #define PLTHOOK_DEBUG_FIXUPS 1
+// #define PLTHOOK_DEBUG_ADDR 1
 
 #ifdef PLTHOOK_DEBUG_CMD
 #define DEBUG_CMD(...) fprintf(stderr, __VA_ARGS__)
@@ -68,6 +69,80 @@
 #define DEBUG_BIND(...) fprintf(stderr, __VA_ARGS__)
 #else
 #define DEBUG_BIND(...)
+#endif
+
+#ifdef PLTHOOK_DEBUG_ADDR
+#include <mach/mach.h>
+
+#define INHERIT_MAX_SIZE 11
+static char *inherit_to_str(vm_inherit_t inherit, char *buf)
+{
+    switch (inherit) {
+    case VM_INHERIT_SHARE: return "share";
+    case VM_INHERIT_COPY: return "copy";
+    case VM_INHERIT_NONE: return "none";
+    case VM_INHERIT_DONATE_COPY: return "donate_copy";
+    default:
+        sprintf(buf, "%d", inherit);
+        return buf;
+    }
+}
+
+#define BEHAVIOR_MAX_SIZE 16
+static char *behavior_to_str(vm_behavior_t behavior, char *buf)
+{
+    switch (behavior) {
+    case VM_BEHAVIOR_DEFAULT: return "default";
+    case VM_BEHAVIOR_RANDOM: return "random";
+    case VM_BEHAVIOR_SEQUENTIAL: return "sequential";
+    case VM_BEHAVIOR_RSEQNTL: return "rseqntl";
+    case VM_BEHAVIOR_WILLNEED: return "willneed";
+    case VM_BEHAVIOR_DONTNEED: return "dontneed";
+    case VM_BEHAVIOR_FREE: return "free";
+    case VM_BEHAVIOR_ZERO_WIRED_PAGES: return "zero";
+    case VM_BEHAVIOR_REUSABLE: return "reusable";
+    case VM_BEHAVIOR_REUSE: return "reuse";
+    case VM_BEHAVIOR_CAN_REUSE: return "can";
+    case VM_BEHAVIOR_PAGEOUT: return "pageout";
+    default:
+        sprintf(buf, "%d", behavior);
+        return buf;
+    }
+}
+
+static void dump_maps(const char *image_name)
+{
+    mach_port_t task = mach_task_self();
+    vm_region_basic_info_data_64_t info;
+    mach_msg_type_number_t info_count = VM_REGION_BASIC_INFO_COUNT_64;
+    memory_object_name_t object = 0;
+    vm_address_t addr = 0;
+    vm_size_t size;
+    char inherit_buf[INHERIT_MAX_SIZE + 1];
+    char behavior_buf[BEHAVIOR_MAX_SIZE + 1];
+
+    fprintf(stderr, "MEMORY MAP(%s)\n", image_name);
+    fprintf(stderr, " start address    end address      protection    max_protection inherit     shared reserved offset   behavior         user_wired_count\n");
+    while (vm_region_64(task, &addr, &size, VM_REGION_BASIC_INFO_64, (vm_region_info_t)&info, &info_count, &object) == KERN_SUCCESS) {
+        fprintf(stderr, " %016lx-%016lx %c%c%c(%08x) %c%c%c(%08x)  %-*s %c      %c        %08llx %-*s %u\n",
+                addr, addr + size,
+                (info.protection & VM_PROT_READ) ? 'r' : '-',
+                (info.protection & VM_PROT_WRITE) ? 'w' : '-',
+                (info.protection & VM_PROT_EXECUTE) ? 'x' : '-',
+                info.protection,
+                (info.max_protection & VM_PROT_READ) ? 'r' : '-',
+                (info.max_protection & VM_PROT_WRITE) ? 'w' : '-',
+                (info.max_protection & VM_PROT_EXECUTE) ? 'x' : '-',
+                info.max_protection,
+                INHERIT_MAX_SIZE, inherit_to_str(info.inheritance, inherit_buf),
+                info.shared ? 'Y' : 'N',
+                info.reserved ? 'Y' : 'N',
+                info.offset,
+                BEHAVIOR_MAX_SIZE, behavior_to_str(info.behavior, behavior_buf),
+                info.user_wired_count);
+        addr += size;
+    }
+}
 #endif
 
 #ifdef __LP64__
@@ -247,19 +322,25 @@ static int plthook_open_real(plthook_t **plthook_out, uint32_t image_idx, const 
 
     data.linkedit_segment_idx = -1;
     data.slide = _dyld_get_image_vmaddr_slide(image_idx);
-    DEBUG_CMD("slide=%"PRIxPTR"\n", data.slide);
     if (mh == NULL) {
         mh = _dyld_get_image_header(image_idx);
     }
     if (image_name == NULL) {
         image_name = _dyld_get_image_name(image_idx);
     }
+#if defined(PLTHOOK_DEBUG_CMD) || defined(PLTHOOK_DEBUG_ADDR)
+    fprintf(stderr, "mh=%"PRIxPTR" slide=%"PRIxPTR"\n", (uintptr_t)mh, data.slide);
+#endif
+#ifdef PLTHOOK_DEBUG_ADDR
+    dump_maps(image_name);
+#endif
 
 #ifdef __LP64__
     cmd = (struct load_command *)((size_t)mh + sizeof(struct mach_header_64));
 #else
     cmd = (struct load_command *)((size_t)mh + sizeof(struct mach_header));
 #endif
+    DEBUG_CMD("CMD START\n");
     for (i = 0; i < mh->ncmds; i++) {
         struct dyld_info_command *dyld_info;
         struct segment_command *segment;
@@ -390,6 +471,9 @@ static int plthook_open_real(plthook_t **plthook_out, uint32_t image_idx, const 
         case LC_UUID: /* 0x1b */
             DEBUG_CMD("LC_UUID\n");
             break;
+        case LC_CODE_SIGNATURE: /* 0x1d */
+            DEBUG_CMD("LC_CODE_SIGNATURE\n");
+            break;
         case LC_VERSION_MIN_MACOSX: /* 0x24 */
             DEBUG_CMD("LC_VERSION_MIN_MACOSX\n");
             break;
@@ -436,6 +520,7 @@ static int plthook_open_real(plthook_t **plthook_out, uint32_t image_idx, const 
         }
         cmd = (struct load_command *)((size_t)cmd + cmd->cmdsize);
     }
+    DEBUG_CMD("CMD END\n");
     if (data.linkedit_segment_idx == -1) {
         set_errmsg("Cannot find the linkedit segment: %s", image_name);
         return PLTHOOK_INVALID_FILE_FORMAT;
@@ -695,12 +780,13 @@ static int read_chained_fixups(data_t *d, const struct mach_header *mh, const ch
             uint16_t break_loop = 1;
             off_t offset;
 
-            DEBUG_FIXUPS("      page_start[%u]     %u\n", j, seg->page_start[j]);
             if (seg->page_start[j] == DYLD_CHAINED_PTR_START_NONE) {
+                DEBUG_FIXUPS("      page_start[%u]     DYLD_CHAINED_PTR_START_NONE\n", j);
                 continue;
             }
             if (seg->page_start[j] & DYLD_CHAINED_PTR_START_MULTI) {
                 index = seg->page_start[j] & ~DYLD_CHAINED_PTR_START_MULTI;
+                DEBUG_FIXUPS("      page_start[%u]     (DYLD_CHAINED_PTR_START_MULTI | %u)\n", j, index);
                 break_loop = 0;
             }
             while (1) {
