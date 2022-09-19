@@ -648,7 +648,7 @@ static void set_bind_addr(data_t *data, unsigned int *idx, const char *sym_name,
 #ifdef LC_DYLD_CHAINED_FIXUPS
 static int read_chained_fixups(data_t *d, const struct mach_header *mh, const char *image_name)
 {
-    const uint8_t *ptr = (const uint8_t *)(d->chained_fixups->dataoff + d->slide);
+    const uint8_t *ptr = (const uint8_t *)mh + d->chained_fixups->dataoff;
     const uint8_t *end = ptr + d->chained_fixups->datasize;
     const struct dyld_chained_fixups_header *header = (const struct dyld_chained_fixups_header *)ptr;
     const struct dyld_chained_import *import = (const struct dyld_chained_import *)(ptr + header->imports_offset);
