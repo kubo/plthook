@@ -145,12 +145,6 @@ static void dump_maps(const char *image_name)
 }
 #endif
 
-#ifdef __LP64__
-#define segment_command_ segment_command_64
-#else
-#define segment_command_ segment_command
-#endif
-
 typedef struct {
     const char *name;
     void **addr;
@@ -171,7 +165,7 @@ typedef struct {
     intptr_t slide;
     int num_segments;
     int linkedit_segment_idx;
-    struct segment_command_ *segments[MAX_SEGMENTS];
+    struct segment_command_64 *segments[MAX_SEGMENTS];
 #ifdef LC_DYLD_CHAINED_FIXUPS
     struct linkedit_data_command *chained_fixups;
     size_t got_addr;
@@ -335,20 +329,20 @@ static int plthook_open_real(plthook_t **plthook_out, uint32_t image_idx, const 
     dump_maps(image_name);
 #endif
 
-#ifdef __LP64__
     cmd = (struct load_command *)((size_t)mh + sizeof(struct mach_header_64));
-#else
-    cmd = (struct load_command *)((size_t)mh + sizeof(struct mach_header));
-#endif
     DEBUG_CMD("CMD START\n");
     for (i = 0; i < mh->ncmds; i++) {
         struct dyld_info_command *dyld_info;
+#ifdef PLTHOOK_DEBUG_CMD
         struct segment_command *segment;
+#endif
         struct segment_command_64 *segment64;
 
         switch (cmd->cmd) {
         case LC_SEGMENT: /* 0x1 */
+#ifdef PLTHOOK_DEBUG_CMD
             segment = (struct segment_command *)cmd;
+#endif
             DEBUG_CMD("LC_SEGMENT\n"
                       "  segname   %s\n"
                       "  vmaddr    %8x  vmsize     %8x\n"
@@ -360,16 +354,6 @@ static int plthook_open_real(plthook_t **plthook_out, uint32_t image_idx, const 
                       segment->fileoff, segment->filesize,
                       segment->maxprot, segment->initprot,
                       segment->nsects, segment->flags);
-#ifndef __LP64__
-            if (strcmp(segment->segname, "__LINKEDIT") == 0) {
-                data.linkedit_segment_idx = data.num_segments;
-            }
-            if (data.num_segments == MAX_SEGMENTS) {
-                set_errmsg("Too many segments:  %s", image_name);
-                return PLTHOOK_INTERNAL_ERROR;
-            }
-            data.segments[data.num_segments++] = segment;
-#endif
             break;
         case LC_SEGMENT_64: /* 0x19 */
             segment64 = (struct segment_command_64 *)cmd;
@@ -384,7 +368,6 @@ static int plthook_open_real(plthook_t **plthook_out, uint32_t image_idx, const 
                       segment64->fileoff, segment64->filesize,
                       segment64->maxprot, segment64->initprot,
                       segment64->nsects, segment64->flags);
-#ifdef __LP64__
             if (strcmp(segment64->segname, "__LINKEDIT") == 0) {
                 data.linkedit_segment_idx = data.num_segments;
             }
@@ -431,7 +414,6 @@ static int plthook_open_real(plthook_t **plthook_out, uint32_t image_idx, const 
                 return PLTHOOK_INTERNAL_ERROR;
             }
             data.segments[data.num_segments++] = segment64;
-#endif
             break;
         case LC_DYLD_INFO_ONLY: /* (0x22|LC_REQ_DYLD) */
             dyld_info= (struct dyld_info_command *)cmd;
@@ -552,7 +534,7 @@ static int plthook_open_real(plthook_t **plthook_out, uint32_t image_idx, const 
 
 static unsigned int set_bind_addrs(data_t *data, uint32_t lazy_bind_off, uint32_t lazy_bind_size)
 {
-    struct segment_command_ *linkedit = data->segments[data->linkedit_segment_idx];
+    struct segment_command_64 *linkedit = data->segments[data->linkedit_segment_idx];
     const uint8_t *ptr = (uint8_t*)(linkedit->vmaddr - linkedit->fileoff + data->slide + lazy_bind_off);
     const uint8_t *end = ptr + lazy_bind_size;
     const char *sym_name;
