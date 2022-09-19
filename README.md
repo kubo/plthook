@@ -214,7 +214,7 @@ Supported Platforms
 | Linux i386 and x86_64 | plthook_elf.c | tested using [github actions] |
 | Linux arm, aarch64, powerpc and powerpc64le | plthook_elf.c | tested on [QEMU][] using [github actions] |
 | Windows 32-bit and x64 (MSVC) | plthook_win32.c | tested using [github actions] |
-| macOS (intel) | plthook_osx.c | tested using [github actions] |
+| macOS (intel) (*5) | plthook_osx.c | tested using [github actions] |
 | macOS (arm) | plthook_osx.c | probably(*4) |
 | Windows 32-bit and x64 (Mingw32 and Cygwin) | plthook_win32.c | perhaps(*2) |
 | Solaris x86_64 | plthook_elf.c | perhaps(*1) |
@@ -225,6 +225,7 @@ Supported Platforms
 *2 Tested on travis-ci.org before.  
 *3 Contributed by [Daniel Deptford][].  
 *4 Tested on [bitrise M1 stacks](https://devcenter.bitrise.io/en/infrastructure/build-stacks/apple-silicon-m1-stacks.html). (2022-09-19)  
+*5 10.14 Mojave support was dropped on 2022-09-19.  
 
 [QEMU]: http://www.qemu.org/
 [Daniel Deptford]: https://github.com/redmercury

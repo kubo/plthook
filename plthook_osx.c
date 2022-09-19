@@ -42,10 +42,8 @@
 #include <dlfcn.h>
 #include <errno.h>
 #include <mach-o/dyld.h>
-#ifdef LC_DYLD_CHAINED_FIXUPS
 #include <sys/mman.h>
 #include <mach-o/fixup-chains.h>
-#endif
 #include "plthook.h"
 
 // #define PLTHOOK_DEBUG_CMD 1
@@ -152,9 +150,7 @@ typedef struct {
 
 struct plthook {
     unsigned int num_entries;
-#ifdef LC_DYLD_CHAINED_FIXUPS
     int readonly_segment;
-#endif
     bind_address_t entries[1]; /* This must be the last. */
 };
 
@@ -166,18 +162,14 @@ typedef struct {
     int num_segments;
     int linkedit_segment_idx;
     struct segment_command_64 *segments[MAX_SEGMENTS];
-#ifdef LC_DYLD_CHAINED_FIXUPS
     struct linkedit_data_command *chained_fixups;
     size_t got_addr;
-#endif
 } data_t;
 
 static int plthook_open_real(plthook_t **plthook_out, uint32_t image_idx, const struct mach_header *mh, const char *image_name);
 static unsigned int set_bind_addrs(data_t *d, uint32_t lazy_bind_off, uint32_t lazy_bind_size);
 static void set_bind_addr(data_t *d, unsigned int *idx, const char *sym_name, int seg_index, int seg_offset);
-#ifdef LC_DYLD_CHAINED_FIXUPS
 static int read_chained_fixups(data_t *d, const struct mach_header *mh, const char *image_name);
-#endif
 
 static void set_errmsg(const char *fmt, ...) __attribute__((__format__ (__printf__, 1, 2)));
 
@@ -371,7 +363,6 @@ static int plthook_open_real(plthook_t **plthook_out, uint32_t image_idx, const 
             if (strcmp(segment64->segname, "__LINKEDIT") == 0) {
                 data.linkedit_segment_idx = data.num_segments;
             }
-#ifdef LC_DYLD_CHAINED_FIXUPS
             if (strcmp(segment64->segname, "__DATA_CONST") == 0) {
                 struct section_64 *sec = (struct section_64 *)(segment64 + 1);
                 uint32_t i;
@@ -408,7 +399,6 @@ static int plthook_open_real(plthook_t **plthook_out, uint32_t image_idx, const 
                     sec++;
                 }
             }
-#endif
             if (data.num_segments == MAX_SEGMENTS) {
                 set_errmsg("Too many segments: %s", image_name);
                 return PLTHOOK_INTERNAL_ERROR;
@@ -474,17 +464,12 @@ static int plthook_open_real(plthook_t **plthook_out, uint32_t image_idx, const 
         case LC_DYLIB_CODE_SIGN_DRS: /* 0x2B */
             DEBUG_CMD("LC_DYLIB_CODE_SIGN_DRS\n");
             break;
-#ifdef LC_BUILD_VERSION
         case LC_BUILD_VERSION: /* 0x32 */
             DEBUG_CMD("LC_BUILD_VERSION\n");
             break;
-#endif
-#ifdef LC_DYLD_EXPORTS_TRIE
         case LC_DYLD_EXPORTS_TRIE: /* (0x33|LC_REQ_DYLD) */
             DEBUG_CMD("LC_DYLD_EXPORTS_TRIE\n");
             break;
-#endif
-#ifdef LC_DYLD_CHAINED_FIXUPS
         case LC_DYLD_CHAINED_FIXUPS: /* (0x34|LC_REQ_DYLD) */
             data.chained_fixups = (struct linkedit_data_command *)cmd;
             DEBUG_CMD("LC_DYLD_CHAINED_FIXUPS\n"
@@ -496,7 +481,6 @@ static int plthook_open_real(plthook_t **plthook_out, uint32_t image_idx, const 
                       data.chained_fixups->dataoff,
                       data.chained_fixups->datasize);
             break;
-#endif
         default:
             DEBUG_CMD("LC_? (0x%x)\n", cmd->cmd);
         }
@@ -507,14 +491,12 @@ static int plthook_open_real(plthook_t **plthook_out, uint32_t image_idx, const 
         set_errmsg("Cannot find the linkedit segment: %s", image_name);
         return PLTHOOK_INVALID_FILE_FORMAT;
     }
-#ifdef LC_DYLD_CHAINED_FIXUPS
     if (data.chained_fixups != NULL) {
         int rv = read_chained_fixups(&data, mh, image_name);
         if (rv != 0) {
             return rv;
         }
     } else {
-#endif
         nbind = set_bind_addrs(&data, lazy_bind_off, lazy_bind_size);
         size = offsetof(plthook_t, entries) + sizeof(bind_address_t) * nbind;
         data.plthook = (plthook_t*)calloc(1, size);
@@ -524,9 +506,7 @@ static int plthook_open_real(plthook_t **plthook_out, uint32_t image_idx, const 
         }
         data.plthook->num_entries = nbind;
         set_bind_addrs(&data, lazy_bind_off, lazy_bind_size);
-#ifdef LC_DYLD_CHAINED_FIXUPS
     }
-#endif
 
     *plthook_out = data.plthook;
     return 0;
@@ -631,7 +611,6 @@ static void set_bind_addr(data_t *data, unsigned int *idx, const char *sym_name,
     (*idx)++;
 }
 
-#ifdef LC_DYLD_CHAINED_FIXUPS
 static int read_chained_fixups(data_t *d, const struct mach_header *mh, const char *image_name)
 {
     const uint8_t *ptr = (const uint8_t *)mh + d->chained_fixups->dataoff;
@@ -983,7 +962,6 @@ cleanup:
     }
     return rv;
 }
-#endif
 
 int plthook_enum(plthook_t *plthook, unsigned int *pos, const char **name_out, void ***addr_out)
 {
@@ -1038,7 +1016,6 @@ matched:
         if (oldfunc) {
             *oldfunc = *addr;
         }
-#ifdef LC_DYLD_CHAINED_FIXUPS
         if (plthook->readonly_segment) {
             size_t page_size = sysconf(_SC_PAGESIZE);
             void *base = (void*)((size_t)addr & ~(page_size - 1));
@@ -1049,11 +1026,8 @@ matched:
             *addr = funcaddr;
             mprotect(base, page_size, PROT_READ);
         } else {
-#endif
             *addr = funcaddr;
-#ifdef LC_DYLD_CHAINED_FIXUPS
         }
-#endif
         return 0;
     }
     if (rv == EOF) {
