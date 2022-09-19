@@ -546,8 +546,6 @@ static unsigned int set_bind_addrs(data_t *data, uint32_t lazy_bind_off, uint32_
     while (ptr < end) {
         uint8_t op = *ptr & BIND_OPCODE_MASK;
         uint8_t imm = *ptr & BIND_IMMEDIATE_MASK;
-        uint64_t ulebval;
-        int64_t slebval;
         int i;
 
         DEBUG_BIND("0x%02x: ", *ptr);
@@ -560,8 +558,11 @@ static unsigned int set_bind_addrs(data_t *data, uint32_t lazy_bind_off, uint32_
             DEBUG_BIND("BIND_OPCODE_SET_DYLIB_ORDINAL_IMM: ordinal = %u\n", imm);
             break;
         case BIND_OPCODE_SET_DYLIB_ORDINAL_ULEB:
-            ulebval = uleb128(&ptr);
-            DEBUG_BIND("BIND_OPCODE_SET_DYLIB_ORDINAL_ULEB: ordinal = %llu\n", ulebval);
+#ifdef PLTHOOK_DEBUG_BIND
+            DEBUG_BIND("BIND_OPCODE_SET_DYLIB_ORDINAL_ULEB: ordinal = %llu\n", uleb128(&ptr));
+#else
+            uleb128(&ptr);
+#endif
             break;
         case BIND_OPCODE_SET_DYLIB_SPECIAL_IMM:
             if (imm == 0) {
@@ -578,8 +579,11 @@ static unsigned int set_bind_addrs(data_t *data, uint32_t lazy_bind_off, uint32_
             DEBUG_BIND("BIND_OPCODE_SET_TYPE_IMM: type = %u\n", imm);
             break;
         case BIND_OPCODE_SET_ADDEND_SLEB:
-            slebval = sleb128(&ptr);
-            DEBUG_BIND("BIND_OPCODE_SET_ADDEND_SLEB: ordinal = %lld\n", slebval);
+#ifdef PLTHOOK_DEBUG_BIND
+            DEBUG_BIND("BIND_OPCODE_SET_ADDEND_SLEB: ordinal = %lld\n", sleb128(&ptr));
+#else
+            sleb128(&ptr);
+#endif
             break;
         case BIND_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB:
             seg_index = imm;
