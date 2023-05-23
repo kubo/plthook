@@ -98,6 +98,15 @@
 #elif defined __powerpc__
 #define R_JUMP_SLOT   R_PPC_JMP_SLOT
 #define R_GLOBAL_DATA R_PPC_GLOB_DAT
+#elif defined __riscv
+#define R_JUMP_SLOT   R_RISCV_JUMP_SLOT
+#if __riscv_xlen == 32
+#define R_GLOBAL_DATA R_RISCV_32
+#elif __riscv_xlen == 64
+#define R_GLOBAL_DATA R_RISCV_64
+#else
+#error unsupported RISCV implementation
+#endif
 #elif 0 /* disabled because not tested */ && (defined __sparcv9 || defined __sparc_v9__)
 #define R_JUMP_SLOT   R_SPARC_JMP_SLOT
 #elif 0 /* disabled because not tested */ && (defined __sparc || defined __sparc__)
@@ -553,6 +562,12 @@ static int plthook_open_real(plthook_t **plthook_out, struct link_map *lmap)
 
 #if defined __linux__
     plthook.plt_addr_base = (char*)lmap->l_addr;
+#if defined __riscv
+    const Elf_Ehdr *ehdr = (const Elf_Ehdr*)lmap->l_addr;
+    if (ehdr->e_type == ET_DYN) {
+        dyn_addr_base = (const char*)lmap->l_addr;
+    }
+#endif
 #if defined __ANDROID__ || defined __UCLIBC__
     dyn_addr_base = (const char*)lmap->l_addr;
 #endif
