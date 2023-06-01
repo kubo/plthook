@@ -33,10 +33,11 @@ jobs:
     - uses: actions/checkout@v2
     - name: Install packages
       run: |
-        sudo apt install -y gcc-multilib libc6-dbg valgrind
+        sudo apt update
+        sudo apt install -y gcc-multilib libc6-dbg valgrind      
         sudo dpkg --add-architecture i386
         sudo apt update
-        sudo apt install -y libc6-dbg:i386
+        sudo apt install -y libc6-dbg:i386 libgcc-s1:i386
     - name: x86_64 without optimization
       run: |
         make relro_pie_tests
@@ -72,7 +73,7 @@ jobs:
         ./uclibc-test.sh i686
 
   tests_on_qemu:
-    name: Tests on Qemu (arm, armhf, arm64, ppc and ppc64le)
+    name: Tests on Qemu (arm, armhf, arm64, ppc, ppc64le and riscv64)
     if: github.event.inputs.tests_on_qemu == 'true' || github.event.inputs.tests_on_qemu == ''
     runs-on: ubuntu-latest
     defaults:
@@ -82,7 +83,8 @@ jobs:
     - uses: actions/checkout@v2
     - name: Install packages
       run: |
-        sudo apt install -y qemu-user gcc-arm-linux-gnueabi gcc-arm-linux-gnueabihf gcc-aarch64-linux-gnu gcc-powerpc-linux-gnu gcc-powerpc64le-linux-gnu libc6-dev-armhf-cross libc6-dev-ppc64el-cross libc6-dev-powerpc-cross libc6-dev-armel-cross libc6-dev-arm64-cross
+        sudo apt update
+        sudo apt install -y qemu-user gcc-arm-linux-gnueabi gcc-arm-linux-gnueabihf gcc-aarch64-linux-gnu gcc-powerpc-linux-gnu gcc-powerpc64le-linux-gnu gcc-riscv64-linux-gnu libc6-dev-armhf-cross libc6-dev-ppc64el-cross libc6-dev-powerpc-cross libc6-dev-armel-cross libc6-dev-arm64-cross
     - name: arm-linux-gnueabi without optimization
       run: |
         make relro_pie_tests TARGET_PLATFORM=arm-linux-gnueabi
@@ -98,6 +100,9 @@ jobs:
     - name: powerpc64le-linux-gnu without optimization
       run: |
         make relro_pie_tests TARGET_PLATFORM=powerpc64le-linux-gnu QEMU_ARCH=ppc64le
+    - name: riscv64-linux-gnu without optimization
+      run: |
+        make relro_pie_tests TARGET_PLATFORM=riscv64-linux-gnu QEMU_ARCH=riscv64
     - name: set OPT_CLFAGS
       run: |
         echo OPT_CFLAGS=-O3 >> $GITHUB_ENV
@@ -116,6 +121,9 @@ jobs:
     - name: powerpc64le-linux-gnu with optimization
       run: |
         make relro_pie_tests TARGET_PLATFORM=powerpc64le-linux-gnu QEMU_ARCH=ppc64le
+    - name: riscv64-linux-gnu with optimization
+      run: |
+        make relro_pie_tests TARGET_PLATFORM=riscv64-linux-gnu QEMU_ARCH=riscv64
 
   tests_on_macos:
     name: Tests on macOS
