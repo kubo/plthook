@@ -130,7 +130,7 @@ jobs:
     if: github.event.inputs.tests_on_macos == 'true' || github.event.inputs.tests_on_macos == ''
     strategy:
       matrix:
-        os: [macos-11, macos-12]
+        os: [macos-12, macos-13, macos-14]
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -151,16 +151,15 @@ jobs:
         xcrun dyldinfo 2>&1 | tee dyldinfo-help.txt
         for arg in $(awk '/^\t-/ {print $1}' dyldinfo-help.txt); do echo "======== $arg ========"; xcrun dyldinfo $arg libtest.so; done
     - name: dyld_info
-      if: ${{ matrix.os != 'macos-11' }}
       run: |
         for arg in -segments -dependents -inits -exports -imports -objc -fixups -fixup_chains -fixup_chain_details -symbolic_fixups; do echo "======== $arg ========"; xcrun dyld_info $arg libtest.so; done; true
-    - name: x86_64 without optimization
+    - name: tests without optimization
       run: |
         make run_tests
     - name: set OPT_CLFAGS
       run: |
         echo OPT_CFLAGS=-O3 >> $GITHUB_ENV
-    - name: x86_64 with optimization
+    - name: tests with optimization
       run: |
         make run_tests
 
