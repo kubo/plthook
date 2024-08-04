@@ -1028,6 +1028,11 @@ static int get_mem_prot(plthook_t *plthook, void *addr)
 
 int plthook_enum(plthook_t *plthook, unsigned int *pos, const char **name_out, void ***addr_out)
 {
+    return plthook_enum_with_prot(plthook, pos, name_out, addr_out, NULL);
+}
+
+int plthook_enum_with_prot(plthook_t *plthook, unsigned int *pos, const char **name_out, void ***addr_out, int *prot)
+{
     if (*pos >= plthook->num_entries) {
         *name_out = NULL;
         *addr_out = NULL;
@@ -1036,6 +1041,9 @@ int plthook_enum(plthook_t *plthook, unsigned int *pos, const char **name_out, v
     *name_out = plthook->entries[*pos].name;
     *addr_out = plthook->entries[*pos].addr;
     (*pos)++;
+    if (prot != NULL) {
+        *prot = get_mem_prot(plthook, *addr_out);
+    }
     return 0;
 }
 

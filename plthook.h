@@ -59,6 +59,12 @@ int plthook_replace(plthook_t *plthook, const char *funcname, void *funcaddr, vo
 void plthook_close(plthook_t *plthook);
 const char *plthook_error(void);
 
+/* enumerate entries with memory protection information (bitwise-OR of PROT_READ, PROT_WRITE and PROT_EXEC)
+ *
+ * source: plthook_elf.c and plthook_osx.c
+ */
+int plthook_enum_with_prot(plthook_t *plthook, unsigned int *pos, const char **name_out, void ***addr_out, int *prot);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

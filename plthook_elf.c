@@ -826,11 +826,19 @@ static int check_rel(const plthook_t *plthook, const Elf_Plt_Rel *plt, Elf_Xword
 
 int plthook_enum(plthook_t *plthook, unsigned int *pos, const char **name_out, void ***addr_out)
 {
+    return plthook_enum_with_prot(plthook, pos, name_out, addr_out, NULL);
+}
+
+int plthook_enum_with_prot(plthook_t *plthook, unsigned int *pos, const char **name_out, void ***addr_out, int *prot)
+{
     while (*pos < plthook->rela_plt_cnt) {
         const Elf_Plt_Rel *plt = plthook->rela_plt + *pos;
         int rv = check_rel(plthook, plt, R_JUMP_SLOT, name_out, addr_out);
         (*pos)++;
         if (rv >= 0) {
+            if (rv == 0 && prot != NULL) {
+                *prot = plthook_get_mem_prot(plthook, *addr_out);
+            }
             return rv;
         }
     }
@@ -840,6 +848,9 @@ int plthook_enum(plthook_t *plthook, unsigned int *pos, const char **name_out, v
         int rv = check_rel(plthook, plt, R_GLOBAL_DATA, name_out, addr_out);
         (*pos)++;
         if (rv >= 0) {
+            if (rv == 0 && prot != NULL) {
+                *prot = plthook_get_mem_prot(plthook, *addr_out);
+            }
             return rv;
         }
     }
