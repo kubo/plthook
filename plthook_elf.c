@@ -187,6 +187,14 @@
 #endif
 #endif /* __LP64__ */
 
+typedef struct mem_prot {
+    size_t start;
+    size_t end;
+    int prot;
+} mem_prot_t;
+
+#define NUM_MEM_PROT 20
+
 struct plthook {
     const Elf_Sym *dynsym;
     const char *dynstr;
@@ -198,6 +206,7 @@ struct plthook {
     const Elf_Plt_Rel *rela_dyn;
     size_t rela_dyn_cnt;
 #endif
+    mem_prot_t mem_prot[NUM_MEM_PROT];
 };
 
 static char errmsg[512];
@@ -207,7 +216,15 @@ static size_t page_size;
 static int plthook_open_executable(plthook_t **plthook_out);
 static int plthook_open_shared_library(plthook_t **plthook_out, const char *filename);
 static const Elf_Dyn *find_dyn_by_tag(const Elf_Dyn *dyn, Elf_Sxword tag);
+
+typedef struct mem_prot_iter mem_prot_iter_t;
+static int mem_prot_begin(mem_prot_iter_t *iter);
+static int mem_prot_next(mem_prot_iter_t *iter, mem_prot_t *mem_prot);
+static void mem_prot_end(mem_prot_iter_t *iter);
+
 static int plthook_open_real(plthook_t **plthook_out, struct link_map *lmap);
+static int plthook_set_mem_prot(plthook_t *plthook);
+static int plthook_get_mem_prot(plthook_t *plthook, void *addr);
 #if defined __FreeBSD__ || defined __sun
 static int check_elf_header(const Elf_Ehdr *ehdr);
 #endif
@@ -397,22 +414,29 @@ static const Elf_Dyn *find_dyn_by_tag(const Elf_Dyn *dyn, Elf_Sxword tag)
 }
 
 #ifdef __linux__
-static int get_memory_permission(void *address)
-{
-    unsigned long addr = (unsigned long)address;
+struct mem_prot_iter {
     FILE *fp;
+};
+
+static int mem_prot_begin(mem_prot_iter_t *iter)
+{
+    iter->fp = fopen("/proc/self/maps", "r");
+    if (iter->fp == NULL) {
+        set_errmsg("failed to open /proc/self/maps");
+        return -1;
+    }
+    return 0;
+}
+
+static int mem_prot_next(mem_prot_iter_t *iter, mem_prot_t *mem_prot)
+{
     char buf[PATH_MAX];
     char perms[5];
-    int bol = 1;
+    int bol = 1; /* beginnng of line */
 
-    fp = fopen("/proc/self/maps", "r");
-    if (fp == NULL) {
-        set_errmsg("failed to open /proc/self/maps");
-        return 0;
-    }
-    while (fgets(buf, PATH_MAX, fp) != NULL) {
+    while (fgets(buf, PATH_MAX, iter->fp) != NULL) {
         unsigned long start, end;
-        int eol = (strchr(buf, '\n') != NULL);
+        int eol = (strchr(buf, '\n') != NULL); /* end of line */
         if (bol) {
             /* The fgets reads from the beginning of a line. */
             if (!eol) {
@@ -431,120 +455,125 @@ static int get_memory_permission(void *address)
         if (sscanf(buf, "%lx-%lx %4s", &start, &end, perms) != 3) {
             continue;
         }
-        if (start <= addr && addr < end) {
-            int prot = 0;
-            if (perms[0] == 'r') {
-                prot |= PROT_READ;
-            } else if (perms[0] != '-') {
-                goto unknown_perms;
-            }
-            if (perms[1] == 'w') {
-                prot |= PROT_WRITE;
-            } else if (perms[1] != '-') {
-                goto unknown_perms;
-            }
-            if (perms[2] == 'x') {
-                prot |= PROT_EXEC;
-            } else if (perms[2] != '-') {
-                goto unknown_perms;
-            }
-            if (perms[3] != 'p') {
-                goto unknown_perms;
-            }
-            if (perms[4] != '\0') {
-                perms[4] = '\0';
-                goto unknown_perms;
-            }
-            fclose(fp);
-            return prot;
+        mem_prot->start = start;
+        mem_prot->end = end;
+        mem_prot->prot = 0;
+        if (perms[0] == 'r') {
+            mem_prot->prot |= PROT_READ;
         }
-    }
-    fclose(fp);
-    set_errmsg("Could not find memory region containing %p", (void*)addr);
-    return 0;
-unknown_perms:
-    fclose(fp);
-    set_errmsg("Unexcepted memory permission %s at %p", perms, (void*)addr);
-    return 0;
-}
-#elif defined __FreeBSD__
-static int get_memory_permission(void *address)
-{
-    uint64_t addr = (uint64_t)address;
-    struct kinfo_vmentry *top;
-    int i, cnt;
-
-    top = kinfo_getvmmap(getpid(), &cnt);
-    if (top == NULL) {
-         set_errmsg("failed to call kinfo_getvmmap()\n");
-         return 0;
-    }
-    for (i = 0; i < cnt; i++) {
-        struct kinfo_vmentry *kve = top + i;
-
-        if (kve->kve_start <= addr && addr < kve->kve_end) {
-            int prot = 0;
-            if (kve->kve_protection & KVME_PROT_READ) {
-                prot |= PROT_READ;
-            }
-            if (kve->kve_protection & KVME_PROT_WRITE) {
-                prot |= PROT_WRITE;
-            }
-            if (kve->kve_protection & KVME_PROT_EXEC) {
-                prot |= PROT_EXEC;
-            }
-            if (prot == 0) {
-                set_errmsg("Unknown kve_protection 0x%x at %p", kve->kve_protection, (void*)addr);
-            }
-            free(top);
-            return prot;
+        if (perms[1] == 'w') {
+            mem_prot->prot |= PROT_WRITE;
         }
-    }
-    free(top);
-    set_errmsg("Could not find memory region containing %p", (void*)addr);
-    return 0;
-}
-#elif defined(__sun)
-#define NUM_MAPS 20
-static int get_memory_permission(void *address)
-{
-    unsigned long addr = (unsigned long)address;
-    FILE *fp;
-    prmap_t maps[NUM_MAPS];
-    size_t num;
-
-    fp = fopen("/proc/self/map", "r");
-    if (fp == NULL) {
-        set_errmsg("failed to open /proc/self/map");
+        if (perms[2] == 'x') {
+            mem_prot->prot |= PROT_EXEC;
+        }
         return 0;
     }
-    while ((num = fread(maps, sizeof(prmap_t), NUM_MAPS, fp)) > 0) {
-        size_t i;
-        for (i = 0; i < num; i++) {
-            prmap_t *map = &maps[i];
+    return -1;
+}
 
-            if (map->pr_vaddr <= addr && addr < map->pr_vaddr + map->pr_size) {
-                int prot = 0;
-                if (map->pr_mflags & MA_READ) {
-                    prot |= PROT_READ;
-                }
-                if (map->pr_mflags & MA_WRITE) {
-                    prot |= PROT_WRITE;
-                }
-                if (map->pr_mflags & MA_EXEC) {
-                    prot |= PROT_EXEC;
-                }
-                if (prot == 0) {
-                    set_errmsg("Unknown pr_mflags 0x%x at %p", map->pr_mflags, (void*)addr);
-                }
-                fclose(fp);
-                return prot;
-            }
-        }
+static void mem_prot_end(mem_prot_iter_t *iter)
+{
+    if (iter->fp != NULL) {
+        fclose(iter->fp);
     }
-    fclose(fp);
-    set_errmsg("Could not find memory region containing %p", (void*)addr);
+}
+#elif defined __FreeBSD__
+struct mem_prot_iter {
+    struct kinfo_vmentry *kve;
+    int idx;
+    int num;
+};
+
+static int mem_prot_begin(mem_prot_iter_t *iter)
+{
+    iter->kve = kinfo_getvmmap(getpid(), &iter->num);
+    if (iter->kve == NULL) {
+         set_errmsg("failed to call kinfo_getvmmap()\n");
+         return -1;
+    }
+    iter->idx = 0;
     return 0;
+}
+
+static int mem_prot_next(mem_prot_iter_t *iter, mem_prot_t *mem_prot)
+{
+    if (iter->idx >= iter->num) {
+        return -1;
+    }
+    struct kinfo_vmentry *kve = &iter->kve[iter->idx++];
+    mem_prot->start = kve->kve_start;
+    mem_prot->end = kve->kve_end;
+    mem_prot->prot = 0;
+    if (kve->kve_protection & KVME_PROT_READ) {
+        mem_prot->prot |= PROT_READ;
+    }
+    if (kve->kve_protection & KVME_PROT_WRITE) {
+        mem_prot->prot |= PROT_WRITE;
+    }
+    if (kve->kve_protection & KVME_PROT_EXEC) {
+        mem_prot->prot |= PROT_EXEC;
+    }
+    return 0;
+}
+
+static void mem_prot_end(mem_prot_iter_t *iter)
+{
+    if (iter->kve != NULL) {
+        free(iter->kve);
+    }
+}
+#elif defined(__sun)
+struct mem_prot_iter {
+    FILE *fp;
+    prmap_t maps[20];
+    size_t idx;
+    size_t num;
+};
+
+static int mem_prot_begin(mem_prot_iter_t *iter)
+{
+    iter->fp = fopen("/proc/self/map", "r");
+    if (iter->fp == NULL) {
+        set_errmsg("failed to open /proc/self/map");
+        return -1;
+    }
+    iter->idx = iter->num = 0;
+    return 0;
+}
+
+static int mem_prot_next(mem_prot_iter_t *iter, mem_prot_t *mem_prot)
+{
+    prmap_t *map;
+
+    if (iter->idx == iter->num) {
+        iter->num = fread(iter->maps, sizeof(iter->maps[0]), sizeof(iter->maps) / sizeof(iter->maps[0]), iter->fp);
+        if (iter->num == 0) {
+            return -1;
+        }
+        iter->idx = 0;
+    }
+    map = &iter->maps[iter->idx++];
+    mem_prot->start = map->pr_vaddr;
+    mem_prot->end = map->pr_vaddr + map->pr_size;
+    mem_prot->prot = 0;
+    if (map->pr_mflags & MA_READ) {
+        mem_prot->prot |= PROT_READ;
+    }
+    if (map->pr_mflags & MA_WRITE) {
+        mem_prot->prot |= PROT_WRITE;
+    }
+    if (map->pr_mflags & MA_EXEC) {
+        mem_prot->prot |= PROT_EXEC;
+    }
+    return 0;
+}
+
+static void mem_prot_end(mem_prot_iter_t *iter)
+{
+    if (iter->fp != NULL) {
+        fclose(iter->fp);
+    }
 }
 #else
 #error Unsupported platform
@@ -572,7 +601,11 @@ static int plthook_open_real(plthook_t **plthook_out, struct link_map *lmap)
     dyn_addr_base = (const char*)lmap->l_addr;
 #endif
 #elif defined __FreeBSD__ || defined __sun
+#if __FreeBSD__ >= 13
+    const Elf_Ehdr *ehdr = (const Elf_Ehdr*)lmap->l_base;
+#else
     const Elf_Ehdr *ehdr = (const Elf_Ehdr*)lmap->l_addr;
+#endif
     int rv_ = check_elf_header(ehdr);
     if (rv_ != 0) {
         return rv_;
@@ -666,6 +699,9 @@ static int plthook_open_real(plthook_t **plthook_out, struct link_map *lmap)
         return PLTHOOK_INTERNAL_ERROR;
     }
 #endif
+    if (plthook_set_mem_prot(&plthook)) {
+        return PLTHOOK_INTERNAL_ERROR;
+    }
 
     *plthook_out = malloc(sizeof(plthook_t));
     if (*plthook_out == NULL) {
@@ -673,6 +709,53 @@ static int plthook_open_real(plthook_t **plthook_out, struct link_map *lmap)
         return PLTHOOK_OUT_OF_MEMORY;
     }
     **plthook_out = plthook;
+    return 0;
+}
+
+static int plthook_set_mem_prot(plthook_t *plthook)
+{
+    unsigned int pos = 0;
+    const char *name;
+    void **addr;
+    size_t start = (size_t)-1;
+    size_t end = 0;
+    mem_prot_iter_t iter;
+    mem_prot_t mem_prot;
+    int idx = 0;
+
+    while (plthook_enum(plthook, &pos, &name, &addr) == 0) {
+        if (start > (size_t)addr) {
+            start = (size_t)addr;
+        }
+        if (end < (size_t)addr) {
+            end = (size_t)addr;
+        }
+    }
+    end++;
+
+    if (mem_prot_begin(&iter) != 0) {
+        return PLTHOOK_INTERNAL_ERROR;
+    }
+    while (mem_prot_next(&iter, &mem_prot) == 0 && idx < NUM_MEM_PROT) {
+        if (mem_prot.prot != 0 && mem_prot.start <= end && start <= mem_prot.end) {
+            plthook->mem_prot[idx++] = mem_prot;
+        }
+    }
+    mem_prot_end(&iter);
+    return 0;
+}
+
+static int plthook_get_mem_prot(plthook_t *plthook, void *addr)
+{
+    mem_prot_t *ptr = plthook->mem_prot;
+    mem_prot_t *end = ptr + NUM_MEM_PROT;
+
+    while (ptr < end && ptr->prot != 0) {
+        if (ptr->start <= (size_t)addr && (size_t)addr < ptr->end) {
+            return ptr->prot;
+        }
+        ++ptr;
+    }
     return 0;
 }
 
@@ -781,8 +864,10 @@ int plthook_replace(plthook_t *plthook, const char *funcname, void *funcaddr, vo
     while ((rv = plthook_enum(plthook, &pos, &name, &addr)) == 0) {
         if (strncmp(name, funcname, funcnamelen) == 0) {
             if (name[funcnamelen] == '\0' || name[funcnamelen] == '@') {
-                int prot = get_memory_permission(addr);
+                int prot = plthook_get_mem_prot(plthook, addr);
                 if (prot == 0) {
+                    set_errmsg("Could not get the process memory permission at %p",
+                             ALIGN_ADDR(addr));
                     return PLTHOOK_INTERNAL_ERROR;
                 }
                 if (!(prot & PROT_WRITE)) {

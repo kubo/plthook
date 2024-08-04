@@ -41,6 +41,7 @@
 #include <inttypes.h>
 #include <dlfcn.h>
 #include <errno.h>
+#include <mach/mach.h>
 #include <mach-o/dyld.h>
 #include <sys/mman.h>
 #include <mach-o/fixup-chains.h>
@@ -148,9 +149,17 @@ typedef struct {
     void **addr;
 } bind_address_t;
 
+typedef struct mem_prot {
+    size_t start;
+    size_t end;
+    int prot;
+} mem_prot_t;
+
+#define NUM_MEM_PROT 100
+
 struct plthook {
     unsigned int num_entries;
-    int readonly_segment;
+    mem_prot_t mem_prot[NUM_MEM_PROT];
     bind_address_t entries[1]; /* This must be the last. */
 };
 
@@ -170,6 +179,8 @@ static int plthook_open_real(plthook_t **plthook_out, uint32_t image_idx, const 
 static unsigned int set_bind_addrs(data_t *d, uint32_t lazy_bind_off, uint32_t lazy_bind_size);
 static void set_bind_addr(data_t *d, unsigned int *idx, const char *sym_name, int seg_index, int seg_offset);
 static int read_chained_fixups(data_t *d, const struct mach_header *mh, const char *image_name);
+static int set_mem_prot(plthook_t *plthook);
+static int get_mem_prot(plthook_t *plthook, void *addr);
 
 static void set_errmsg(const char *fmt, ...) __attribute__((__format__ (__printf__, 1, 2)));
 
@@ -507,6 +518,7 @@ static int plthook_open_real(plthook_t **plthook_out, uint32_t image_idx, const 
         data.plthook->num_entries = nbind;
         set_bind_addrs(&data, lazy_bind_off, lazy_bind_size);
     }
+    set_mem_prot(data.plthook);
 
     *plthook_out = data.plthook;
     return 0;
@@ -662,7 +674,6 @@ static int read_chained_fixups(data_t *d, const struct mach_header *mh, const ch
         goto cleanup;
     }
     d->plthook->num_entries = header->imports_count;
-    d->plthook->readonly_segment = 1;
 
     switch (header->imports_format) {
     case DYLD_CHAINED_IMPORT:
@@ -963,6 +974,58 @@ cleanup:
     return rv;
 }
 
+static int set_mem_prot(plthook_t *plthook)
+{
+    unsigned int pos = 0;
+    const char *name;
+    void **addr;
+    size_t start = (size_t)-1;
+    size_t end = 0;
+    mach_port_t task = mach_task_self();
+    vm_address_t vm_addr = 0;
+    vm_size_t vm_size;
+    vm_region_basic_info_data_64_t info;
+    mach_msg_type_number_t info_count = VM_REGION_BASIC_INFO_COUNT_64;
+    memory_object_name_t object = 0;
+    int idx = 0;
+
+    while (plthook_enum(plthook, &pos, &name, &addr) == 0) {
+        if (start > (size_t)addr) {
+            start = (size_t)addr;
+        }
+        if (end < (size_t)addr) {
+            end = (size_t)addr;
+        }
+    }
+    end++;
+
+    while (vm_region_64(task, &vm_addr, &vm_size, VM_REGION_BASIC_INFO_64, (vm_region_info_t)&info, &info_count, &object) == KERN_SUCCESS) {
+        mem_prot_t mem_prot = {vm_addr, vm_addr + vm_size, info.protection & (PROT_READ | PROT_WRITE | PROT_EXEC)};
+        if (mem_prot.prot != 0 && mem_prot.start <= end && start <= mem_prot.end) {
+            plthook->mem_prot[idx++] = mem_prot;
+            if (idx == NUM_MEM_PROT) {
+                break;
+            }
+        }
+        vm_addr += vm_size;
+    }
+    return 0;
+}
+
+static int get_mem_prot(plthook_t *plthook, void *addr)
+{
+    mem_prot_t *ptr = plthook->mem_prot;
+    mem_prot_t *end = ptr + NUM_MEM_PROT;
+
+    while (ptr < end && ptr->prot != 0) {
+        if (ptr->start <= (size_t)addr && (size_t)addr < ptr->end) {
+            return ptr->prot;
+        }
+        ++ptr;
+    }
+    return 0;
+}
+
 int plthook_enum(plthook_t *plthook, unsigned int *pos, const char **name_out, void ***addr_out)
 {
     if (*pos >= plthook->num_entries) {
@@ -1016,7 +1079,12 @@ matched:
         if (oldfunc) {
             *oldfunc = *addr;
         }
-        if (plthook->readonly_segment) {
+        int prot = get_mem_prot(plthook, addr);
+        if (prot == 0) {
+            set_errmsg("Could not get the process memory permission at %p", addr);
+            return PLTHOOK_INTERNAL_ERROR;
+        }
+        if (!(prot & PROT_WRITE)) {
             size_t page_size = sysconf(_SC_PAGESIZE);
             void *base = (void*)((size_t)addr & ~(page_size - 1));
             if (mprotect(base, page_size, PROT_READ | PROT_WRITE) != 0) {
@@ -1024,7 +1092,7 @@ matched:
                 return PLTHOOK_INTERNAL_ERROR;
             }
             *addr = funcaddr;
-            mprotect(base, page_size, PROT_READ);
+            mprotect(base, page_size, prot);
         } else {
             *addr = funcaddr;
         }
