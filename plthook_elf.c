@@ -737,7 +737,7 @@ static int plthook_set_mem_prot(plthook_t *plthook)
         return PLTHOOK_INTERNAL_ERROR;
     }
     while (mem_prot_next(&iter, &mem_prot) == 0 && idx < NUM_MEM_PROT) {
-        if (mem_prot.prot != 0 && mem_prot.start <= end && start <= mem_prot.end) {
+        if (mem_prot.prot != 0 && mem_prot.start < end && start < mem_prot.end) {
             plthook->mem_prot[idx++] = mem_prot;
         }
     }

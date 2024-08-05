@@ -1001,7 +1001,7 @@ static int set_mem_prot(plthook_t *plthook)
 
     while (vm_region_64(task, &vm_addr, &vm_size, VM_REGION_BASIC_INFO_64, (vm_region_info_t)&info, &info_count, &object) == KERN_SUCCESS) {
         mem_prot_t mem_prot = {vm_addr, vm_addr + vm_size, info.protection & (PROT_READ | PROT_WRITE | PROT_EXEC)};
-        if (mem_prot.prot != 0 && mem_prot.start <= end && start <= mem_prot.end) {
+        if (mem_prot.prot != 0 && mem_prot.start < end && start < mem_prot.end) {
             plthook->mem_prot[idx++] = mem_prot;
             if (idx == NUM_MEM_PROT) {
                 break;
