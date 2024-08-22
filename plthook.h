@@ -6,7 +6,7 @@
  *
  * ------------------------------------------------------
  *
- * Copyright 2013-2014 Kubo Takehiro <kubo@jiubao.org>
+ * Copyright 2013-2024 Kubo Takehiro <kubo@jiubao.org>
  *
  * Redistribution and use in source and binary forms, with or without modification, are
  * permitted provided that the following conditions are met:
@@ -64,6 +64,19 @@ const char *plthook_error(void);
  * source: plthook_elf.c and plthook_osx.c
  */
 int plthook_enum_with_prot(plthook_t *plthook, unsigned int *pos, const char **name_out, void ***addr_out, int *prot);
+
+typedef struct {
+    const char *name;
+    void **addr;
+#ifdef __APPLE__
+    int addend;
+    // memory protection information. bitwise-OR of PROT_READ, PROT_WRITE and PROT_EXEC
+    int prot;
+    char weak;
+#endif
+} plthook_entry_t;
+
+int plthook_enum_entry(plthook_t *plthook, unsigned int *pos, plthook_entry_t *entry);
 
 #ifdef __cplusplus
 } /* extern "C" */
