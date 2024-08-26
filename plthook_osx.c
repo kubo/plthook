@@ -66,8 +66,10 @@
 
 #ifdef PLTHOOK_DEBUG_BIND
 #define DEBUG_BIND(...) fprintf(stderr, __VA_ARGS__)
+#define DEBUG_BIND_IF(cond, ...) if (cond) fprintf(stderr, __VA_ARGS__)
 #else
 #define DEBUG_BIND(...)
+#define DEBUG_BIND_IF(cond, ...)
 #endif
 
 #ifdef PLTHOOK_DEBUG_ADDR
@@ -182,8 +184,8 @@ typedef struct {
 } data_t;
 
 static int plthook_open_real(plthook_t **plthook_out, uint32_t image_idx, const struct mach_header *mh, const char *image_name);
-static unsigned int set_bind_addrs(data_t *d, uint32_t lazy_bind_off, uint32_t lazy_bind_size);
-static void set_bind_addr(data_t *d, unsigned int *idx, const char *sym_name, int seg_index, int seg_offset);
+static unsigned int set_bind_addrs(data_t *data, unsigned int idx, uint32_t bind_off, uint32_t bind_size, char weak);
+static void set_bind_addr(data_t *d, unsigned int *idx, const char *sym_name, int seg_index, int seg_offset, int addend, char weak);
 static int read_chained_fixups(data_t *d, const struct mach_header *mh, const char *image_name);
 #ifdef PLTHOOK_DEBUG_FIXUPS
 static const char *segment_name_from_addr(data_t *d, size_t addr);
@@ -328,8 +330,7 @@ int plthook_open_by_address(plthook_t **plthook_out, void *address)
 static int plthook_open_real(plthook_t **plthook_out, uint32_t image_idx, const struct mach_header *mh, const char *image_name)
 {
     struct load_command *cmd;
-    uint32_t lazy_bind_off = 0;
-    uint32_t lazy_bind_size = 0;
+    const struct dyld_info_command *dyld_info = NULL;
     unsigned int nbind;
     data_t data = {NULL,};
     size_t size;
@@ -353,7 +354,6 @@ static int plthook_open_real(plthook_t **plthook_out, uint32_t image_idx, const 
     cmd = (struct load_command *)((size_t)mh + sizeof(struct mach_header_64));
     DEBUG_CMD("CMD START\n");
     for (i = 0; i < mh->ncmds; i++) {
-        struct dyld_info_command *dyld_info;
 #ifdef PLTHOOK_DEBUG_CMD
         struct segment_command *segment;
 #endif
@@ -447,8 +447,6 @@ static int plthook_open_real(plthook_t **plthook_out, uint32_t image_idx, const 
             break;
         case LC_DYLD_INFO_ONLY: /* (0x22|LC_REQ_DYLD) */
             dyld_info= (struct dyld_info_command *)cmd;
-            lazy_bind_off = dyld_info->lazy_bind_off;
-            lazy_bind_size = dyld_info->lazy_bind_size;
             DEBUG_CMD("LC_DYLD_INFO_ONLY\n"
                       "                 offset     size\n"
                       "  rebase       %8x %8x\n"
@@ -540,7 +538,10 @@ static int plthook_open_real(plthook_t **plthook_out, uint32_t image_idx, const 
             return rv;
         }
     } else {
-        nbind = set_bind_addrs(&data, lazy_bind_off, lazy_bind_size);
+        nbind = 0;
+        nbind = set_bind_addrs(&data, nbind, dyld_info->bind_off, dyld_info->bind_size, 0);
+        nbind = set_bind_addrs(&data, nbind, dyld_info->weak_bind_off, dyld_info->weak_bind_size, 1);
+        nbind = set_bind_addrs(&data, nbind, dyld_info->lazy_bind_off, dyld_info->lazy_bind_size, 0);
         size = offsetof(plthook_t, entries) + sizeof(bind_address_t) * nbind;
         data.plthook = (plthook_t*)calloc(1, size);
         if (data.plthook == NULL) {
@@ -548,7 +549,10 @@ static int plthook_open_real(plthook_t **plthook_out, uint32_t image_idx, const 
             return PLTHOOK_OUT_OF_MEMORY;
         }
         data.plthook->num_entries = nbind;
-        set_bind_addrs(&data, lazy_bind_off, lazy_bind_size);
+        nbind = 0;
+        nbind = set_bind_addrs(&data, nbind, dyld_info->bind_off, dyld_info->bind_size, 0);
+        nbind = set_bind_addrs(&data, nbind, dyld_info->weak_bind_off, dyld_info->weak_bind_size, 1);
+        nbind = set_bind_addrs(&data, nbind, dyld_info->lazy_bind_off, dyld_info->lazy_bind_size, 0);
     }
     set_mem_prot(data.plthook);
 
@@ -556,101 +560,109 @@ static int plthook_open_real(plthook_t **plthook_out, uint32_t image_idx, const 
     return 0;
 }
 
-static unsigned int set_bind_addrs(data_t *data, uint32_t lazy_bind_off, uint32_t lazy_bind_size)
+static unsigned int set_bind_addrs(data_t *data, unsigned int idx, uint32_t bind_off, uint32_t bind_size, char weak)
 {
-    const struct segment_command_64 *linkedit = data->segments[data->linkedit_segment_idx];
-    const uint8_t *ptr = (uint8_t*)(linkedit->vmaddr - linkedit->fileoff + data->slide + lazy_bind_off);
-    const uint8_t *end = ptr + lazy_bind_size;
+    const uint8_t *ptr = fileoff_to_vmaddr_in_segment(data, data->linkedit_segment_idx, bind_off);
+    const uint8_t *end = ptr + bind_size;
     const char *sym_name;
     int seg_index = 0;
     uint64_t seg_offset = 0;
+    int addend = 0;
     int count, skip;
-    unsigned int idx = 0;
+#ifdef PLTHOOK_DEBUG_BIND
+    int cond = data->plthook != NULL;
+#endif
 
     while (ptr < end) {
         uint8_t op = *ptr & BIND_OPCODE_MASK;
         uint8_t imm = *ptr & BIND_IMMEDIATE_MASK;
         int i;
 
-        DEBUG_BIND("0x%02x: ", *ptr);
+        DEBUG_BIND_IF(cond, "0x%02x: ", *ptr);
         ptr++;
         switch (op) {
         case BIND_OPCODE_DONE:
-            DEBUG_BIND("BIND_OPCODE_DONE\n");
+            DEBUG_BIND_IF(cond, "BIND_OPCODE_DONE\n");
             break;
         case BIND_OPCODE_SET_DYLIB_ORDINAL_IMM:
-            DEBUG_BIND("BIND_OPCODE_SET_DYLIB_ORDINAL_IMM: ordinal = %u\n", imm);
+            DEBUG_BIND_IF(cond, "BIND_OPCODE_SET_DYLIB_ORDINAL_IMM: ordinal = %u\n", imm);
             break;
         case BIND_OPCODE_SET_DYLIB_ORDINAL_ULEB:
 #ifdef PLTHOOK_DEBUG_BIND
-            DEBUG_BIND("BIND_OPCODE_SET_DYLIB_ORDINAL_ULEB: ordinal = %llu\n", uleb128(&ptr));
+            DEBUG_BIND_IF(cond, "BIND_OPCODE_SET_DYLIB_ORDINAL_ULEB: ordinal = %llu\n", uleb128(&ptr));
 #else
             uleb128(&ptr);
 #endif
             break;
         case BIND_OPCODE_SET_DYLIB_SPECIAL_IMM:
             if (imm == 0) {
-                DEBUG_BIND("BIND_OPCODE_SET_DYLIB_SPECIAL_IMM: ordinal = 0\n");
+                DEBUG_BIND_IF(cond, "BIND_OPCODE_SET_DYLIB_SPECIAL_IMM: ordinal = 0\n");
             } else {
-                DEBUG_BIND("BIND_OPCODE_SET_DYLIB_SPECIAL_IMM: ordinal = %u\n", BIND_OPCODE_MASK | imm);
+                DEBUG_BIND_IF(cond, "BIND_OPCODE_SET_DYLIB_SPECIAL_IMM: ordinal = %u\n", BIND_OPCODE_MASK | imm);
             }
+            break;
         case BIND_OPCODE_SET_SYMBOL_TRAILING_FLAGS_IMM:
             sym_name = (const char*)ptr;
             ptr += strlen(sym_name) + 1;
-            DEBUG_BIND("BIND_OPCODE_SET_SYMBOL_TRAILING_FLAGS_IMM: sym_name = %s\n", sym_name);
+            DEBUG_BIND_IF(cond, "BIND_OPCODE_SET_SYMBOL_TRAILING_FLAGS_IMM: sym_name = %s\n", sym_name);
             break;
         case BIND_OPCODE_SET_TYPE_IMM:
-            DEBUG_BIND("BIND_OPCODE_SET_TYPE_IMM: type = %u\n", imm);
+            DEBUG_BIND_IF(cond, "BIND_OPCODE_SET_TYPE_IMM: type = %u\n", imm);
             break;
         case BIND_OPCODE_SET_ADDEND_SLEB:
-#ifdef PLTHOOK_DEBUG_BIND
-            DEBUG_BIND("BIND_OPCODE_SET_ADDEND_SLEB: ordinal = %lld\n", sleb128(&ptr));
-#else
-            sleb128(&ptr);
-#endif
+            addend = sleb128(&ptr);
+            DEBUG_BIND_IF(cond, "BIND_OPCODE_SET_ADDEND_SLEB: ordinal = %lld\n", addend);
             break;
         case BIND_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB:
             seg_index = imm;
             seg_offset = uleb128(&ptr);
-            DEBUG_BIND("BIND_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB: seg_index = %u, seg_offset = 0x%llx\n", seg_index, seg_offset);
+            DEBUG_BIND_IF(cond, "BIND_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB: seg_index = %u, seg_offset = 0x%llx\n", seg_index, seg_offset);
             break;
         case BIND_OPCODE_ADD_ADDR_ULEB:
             seg_offset += uleb128(&ptr);
-            DEBUG_BIND("BIND_OPCODE_ADD_ADDR_ULEB: seg_offset = 0x%llx\n", seg_offset);
+            DEBUG_BIND_IF(cond, "BIND_OPCODE_ADD_ADDR_ULEB: seg_offset = 0x%llx\n", seg_offset);
             break;
         case BIND_OPCODE_DO_BIND:
-            set_bind_addr(data, &idx, sym_name, seg_index, seg_offset);
-            DEBUG_BIND("BIND_OPCODE_DO_BIND\n");
+            set_bind_addr(data, &idx, sym_name, seg_index, seg_offset, addend, weak);
+            seg_offset += sizeof(void*);
+            DEBUG_BIND_IF(cond, "BIND_OPCODE_DO_BIND\n");
             break;
         case BIND_OPCODE_DO_BIND_ADD_ADDR_ULEB:
-            seg_offset += uleb128(&ptr);
-            DEBUG_BIND("BIND_OPCODE_DO_BIND_ADD_ADDR_ULEB: seg_offset = 0x%llx\n", seg_offset);
+            set_bind_addr(data, &idx, sym_name, seg_index, seg_offset, addend, weak);
+            seg_offset += uleb128(&ptr) + sizeof(void*);
+            DEBUG_BIND_IF(cond, "BIND_OPCODE_DO_BIND_ADD_ADDR_ULEB: seg_offset = 0x%llx\n", seg_offset);
             break;
         case BIND_OPCODE_DO_BIND_ADD_ADDR_IMM_SCALED:
-            set_bind_addr(data, &idx, sym_name, seg_index, seg_offset);
-            seg_offset += imm * sizeof(void *);
-            DEBUG_BIND("BIND_OPCODE_DO_BIND_ADD_ADDR_IMM_SCALED\n");
+            set_bind_addr(data, &idx, sym_name, seg_index, seg_offset, addend, weak);
+            seg_offset += imm * sizeof(void *) + sizeof(void*);
+            DEBUG_BIND_IF(cond, "BIND_OPCODE_DO_BIND_ADD_ADDR_IMM_SCALED\n");
             break;
         case BIND_OPCODE_DO_BIND_ULEB_TIMES_SKIPPING_ULEB:
             count = uleb128(&ptr);
             skip = uleb128(&ptr);
             for (i = 0; i < count; i++) {
-                set_bind_addr(data, &idx, sym_name, seg_index, seg_offset);
-                seg_offset += skip;
+                set_bind_addr(data, &idx, sym_name, seg_index, seg_offset, addend, weak);
+                seg_offset += skip + sizeof(void*);
             }
-            DEBUG_BIND("BIND_OPCODE_DO_BIND_ULEB_TIMES_SKIPPING_ULEB\n");
+            DEBUG_BIND_IF(cond, "BIND_OPCODE_DO_BIND_ULEB_TIMES_SKIPPING_ULEB\n");
             break;
+        default:
+            DEBUG_BIND_IF(cond, "op: 0x%x, imm: 0x%x\n", op, imm);
         }
     }
     return idx;
 }
 
-static void set_bind_addr(data_t *data, unsigned int *idx, const char *sym_name, int seg_index, int seg_offset)
+static void set_bind_addr(data_t *data, unsigned int *idx, const char *sym_name, int seg_index, int seg_offset, int addend, char weak)
 {
     if (data->plthook != NULL) {
         size_t vmaddr = data->segments[seg_index]->vmaddr;
-        data->plthook->entries[*idx].name = sym_name;
-        data->plthook->entries[*idx].addr = (void**)(vmaddr + data->slide + seg_offset);
+        bind_address_t *bind_addr = &data->plthook->entries[*idx];
+        bind_addr->name = sym_name;
+        bind_addr->addend = addend;
+        bind_addr->weak = weak;
+        bind_addr->addr = (void**)(vmaddr + data->slide + seg_offset);
+        DEBUG_BIND("bind_address[%u]: %s, %d, %d, %p, %p, %p\n", *idx, sym_name, seg_index, seg_offset, (void*)vmaddr, (void*)data->slide, bind_addr->addr);
     }
     (*idx)++;
 }
@@ -1081,22 +1093,23 @@ int plthook_replace(plthook_t *plthook, const char *funcname, void *funcaddr, vo
 {
     size_t funcnamelen = strlen(funcname);
     unsigned int pos = 0;
-    const char *name;
-    void **addr;
+    plthook_entry_t entry;
     int rv;
 
     if (plthook == NULL) {
         set_errmsg("invalid argument: The first argument is null.");
         return PLTHOOK_INVALID_ARGUMENT;
     }
-    while ((rv = plthook_enum(plthook, &pos, &name, &addr)) == 0) {
+    while ((rv = plthook_enum_entry(plthook, &pos, &entry)) == 0) {
+        const char *name = entry.name;
+        void **addr = entry.addr;
         if (strncmp(name, funcname, funcnamelen) == 0) {
             if (name[funcnamelen] == '\0' || name[funcnamelen] == '$') {
                 goto matched;
             }
         }
         if (name[0] == '@') {
-            /* Oracle libclntsh.dylib imports 'read' as '@_read'. */
+            /* I doubt this code... */
             name++;
             if (strncmp(name, funcname, funcnamelen) == 0) {
                 if (name[funcnamelen] == '\0' || name[funcnamelen] == '$') {
@@ -1117,12 +1130,7 @@ matched:
         if (oldfunc) {
             *oldfunc = *addr;
         }
-        int prot = get_mem_prot(plthook, addr);
-        if (prot == 0) {
-            set_errmsg("Could not get the process memory permission at %p", addr);
-            return PLTHOOK_INTERNAL_ERROR;
-        }
-        if (!(prot & PROT_WRITE)) {
+        if (!(entry.prot & PROT_WRITE)) {
             size_t page_size = sysconf(_SC_PAGESIZE);
             void *base = (void*)((size_t)addr & ~(page_size - 1));
             if (mprotect(base, page_size, PROT_READ | PROT_WRITE) != 0) {
@@ -1130,7 +1138,7 @@ matched:
                 return PLTHOOK_INTERNAL_ERROR;
             }
             *addr = funcaddr;
-            mprotect(base, page_size, prot);
+            mprotect(base, page_size, entry.prot);
         } else {
             *addr = funcaddr;
         }
