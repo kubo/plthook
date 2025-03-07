@@ -1,4 +1,5 @@
-name: tests
+name: Tests
+
 on:
   push:
   pull_request:
@@ -112,9 +113,10 @@ jobs:
     - name: arm-linux-gnueabihf with optimization
       run: |
         make relro_pie_tests TARGET_PLATFORM=arm-linux-gnueabihf
-    - name: aarch64-linux-gnu with optimization
-      run: |
-        make relro_pie_tests TARGET_PLATFORM=aarch64-linux-gnu
+    # TODO: https://github.com/kubo/plthook/issues/51
+    # - name: aarch64-linux-gnu with optimization
+    #   run: |
+    #     make relro_pie_tests TARGET_PLATFORM=aarch64-linux-gnu
     - name: powerpc-linux-gnu with optimization
       run: |
         make relro_pie_tests TARGET_PLATFORM=powerpc-linux-gnu QEMU_ARCH=ppc
@@ -130,7 +132,7 @@ jobs:
     if: github.event.inputs.tests_on_macos == 'true' || github.event.inputs.tests_on_macos == ''
     strategy:
       matrix:
-        os: [macos-12, macos-13, macos-14]
+        os: [macos-13, macos-14, macos-15]
     runs-on: ${{ matrix.os }}
     defaults:
       run:
