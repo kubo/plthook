@@ -63,6 +63,12 @@
 #define stricmp strcasecmp
 #endif
 
+#ifdef PLTHOOK_DEBUG
+#define DEBUG_MSG(...) fprintf(stderr, __VA_ARGS__)
+#else
+#define DEBUG_MSG(...)
+#endif
+
 typedef struct {
     const char *mod_name;
     const char *name;
@@ -214,6 +220,8 @@ static int plthook_open_real(plthook_t **plthook_out, HMODULE hMod)
         const char *module_name = (char *)hMod + desc->Name;
         int is_winsock2_dll = (stricmp(module_name, "WS2_32.DLL") == 0);
 
+        DEBUG_MSG("Imported Library: '%s'\n", module_name);
+
         while (addr_thunk->u1.Function != 0) {
             const char *name = NULL;
 
@@ -248,6 +256,8 @@ static int plthook_open_real(plthook_t **plthook_out, HMODULE hMod)
         if (*module_name == '\0') {
             continue;
         }
+
+        DEBUG_MSG("Imported Delayed Library: '%s'\n", module_name);
 
         while (name_thunk->u1.AddressOfData) {
             const char *name = NULL;

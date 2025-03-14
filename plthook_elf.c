@@ -187,6 +187,13 @@
 #endif
 #endif /* __LP64__ */
 
+/* TODO: Add debug info for library listing */
+#ifdef PLTHOOK_DEBUG
+#define DEBUG_MSG(...) fprintf(stderr, __VA_ARGS__)
+#else
+#define DEBUG_MSG(...)
+#endif
+
 typedef struct mem_prot {
     size_t start;
     size_t end;

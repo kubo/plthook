@@ -47,10 +47,12 @@
 #include <mach-o/fixup-chains.h>
 #include "plthook.h"
 
-// #define PLTHOOK_DEBUG_CMD 1
-// #define PLTHOOK_DEBUG_BIND 1
-// #define PLTHOOK_DEBUG_FIXUPS 1
-// #define PLTHOOK_DEBUG_ADDR 1
+#ifdef PLTHOOK_DEBUG
+#define PLTHOOK_DEBUG_CMD 1
+#define PLTHOOK_DEBUG_BIND 1
+#define PLTHOOK_DEBUG_FIXUPS 1
+#define PLTHOOK_DEBUG_ADDR 1
+#endif
 
 #ifdef PLTHOOK_DEBUG_CMD
 #define DEBUG_CMD(...) fprintf(stderr, __VA_ARGS__)
