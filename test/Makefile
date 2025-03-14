@@ -5,8 +5,9 @@
 UNAME_S := $(shell uname -s)
 
 CFLAGS_SHARED = -shared -fPIC
-CFLAGS = $(CFLAGS_WARNING) $(EXTRA_CFLAGS) $(OPT_CFLAGS)
 CFLAGS_WARNING = -Wall
+CFLAGS = $(CFLAGS_WARNING) $(EXTRA_CFLAGS) $(OPT_CFLAGS)
+LDFLAGS = $(EXTRA_LDFLAGS) $(OPT_LDFLAGS)
 EXEEXT =
 SOEXT = so
 LIBS = -ldl -lm
@@ -58,10 +59,10 @@ endif
 all: libtest.$(SOEXT) testprog$(EXEEXT)
 
 libtest.$(SOEXT): libtest.c libtest.h
-	$(CC) $(CFLAGS_SHARED) $(CFLAGS) -DLIBTEST_DLL -o libtest.$(SOEXT) libtest.c -lm
+	$(CC) $(CFLAGS_SHARED) $(CFLAGS) -DLIBTEST_DLL -o libtest.$(SOEXT) libtest.c -lm $(LDFLAGS)
 
 testprog$(EXEEXT): testprog.c ../$(PLTHOOK_C) libtest.h
-	$(CC) $(CFLAGS_EXE) $(CFLAGS) -o testprog$(EXEEXT) -I.. testprog.c ../$(PLTHOOK_C) -L. -ltest $(LIBS)
+	$(CC) $(CFLAGS_EXE) $(CFLAGS) -o testprog$(EXEEXT) -I.. testprog.c ../$(PLTHOOK_C) -L. -ltest $(LIBS) $(LDFLAGS)
 
 run_tests: clean libtest.$(SOEXT) testprog$(EXEEXT)
 	LD_LIBRARY_PATH=. $(KICK_CMD) ./testprog$(EXEEXT) open

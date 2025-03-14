@@ -248,8 +248,6 @@ int plthook_open(plthook_t **plthook_out, const char *filename)
     }
     cnt = _dyld_image_count();
     namelen = strlen(filename);
-    namelen = strlen(filename);
-    cnt = _dyld_image_count();
 
     for (idx = 0; idx < cnt; idx++) {
         const char *image_name = _dyld_get_image_name(idx);

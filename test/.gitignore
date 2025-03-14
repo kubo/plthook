@@ -5,3 +5,5 @@ libtest.lib
 libtest.so
 testprog
 testprog.exe
+dummy.c
+dummy.o

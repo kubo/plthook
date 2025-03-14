@@ -1,4 +1,4 @@
-name: oracle_client
+name: Oracle Client Test
 on:
   push:
 
