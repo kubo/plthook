@@ -1,4 +1,5 @@
 # Dockerfile for QEMU testing
+# docker build -t metacall/plthook .
 FROM ubuntu:latest
 
 RUN apt update \
