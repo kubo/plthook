@@ -683,14 +683,14 @@ static int plthook_open_real(plthook_t **plthook_out, struct link_map *lmap)
             set_errmsg("failed to find PLT_DT_RELSZ");
             return PLTHOOK_INTERNAL_ERROR;
         }
-        total_size = dyn->d_un.d_ptr;
+        total_size = dyn->d_un.d_val;
 
         dyn = find_dyn_by_tag(lmap->l_ld, PLT_DT_RELENT);
         if (dyn == NULL) {
             set_errmsg("failed to find PLT_DT_RELENT");
             return PLTHOOK_INTERNAL_ERROR;
         }
-        elem_size = dyn->d_un.d_ptr;
+        elem_size = dyn->d_un.d_val;
         plthook.rela_dyn_cnt = total_size / elem_size;
     }
 #endif
