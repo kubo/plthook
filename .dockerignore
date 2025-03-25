@@ -1,0 +1,15 @@
+**
+!plthook_elf.c
+!plthook_osx.c
+!plthook_win32.c
+!plthook.h
+!test
+test/*.obj
+test/libtest.dll
+test/libtest.exp
+test/libtest.lib
+test/libtest.so
+test/testprog
+test/testprog.exe
+test/dummy.c
+test/dummy.o
