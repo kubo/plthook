@@ -40,7 +40,7 @@ static enum_test_data_t funcs_called_by_libtest[] = {
 #else
     {"strtod", 0},
 #endif
-    {NULL, },
+    {NULL, 0},
 };
 
 static enum_test_data_t funcs_called_by_main[] = {
@@ -65,7 +65,7 @@ static enum_test_data_t funcs_called_by_main[] = {
 #else
     {"strtod_cdecl", 0},
 #endif
-    {NULL, },
+    {NULL, 0},
 };
 
 #define STRTOD_STR_SIZE 30
