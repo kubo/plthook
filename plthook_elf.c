@@ -187,7 +187,6 @@
 #endif
 #endif /* __LP64__ */
 
-/* TODO: Add debug info for library listing */
 #ifdef PLTHOOK_DEBUG
 #define DEBUG_MSG(...) fprintf(stderr, __VA_ARGS__)
 #else
@@ -332,14 +331,17 @@ int plthook_open_by_address(plthook_t **plthook_out, void *address)
     return plthook_open_real(plthook_out, &data.lmap);
 #else
     Dl_info info;
-    struct link_map *lmap = NULL;
+    union {
+        struct link_map *lmap;
+        void *ptr;
+    } addr = { NULL };
 
     *plthook_out = NULL;
-    if (dladdr1(address, &info, (void**)&lmap, RTLD_DL_LINKMAP) == 0) {
+    if (dladdr1(address, &info, (void**)(&addr.ptr), RTLD_DL_LINKMAP) == 0) {
         set_errmsg("dladdr error");
         return PLTHOOK_FILE_NOT_FOUND;
     }
-    return plthook_open_real(plthook_out, lmap);
+    return plthook_open_real(plthook_out, addr.lmap);
 #endif
 }
 
@@ -826,6 +828,7 @@ static int check_rel(const plthook_t *plthook, const Elf_Plt_Rel *plt, Elf_Xword
         }
         *name_out = plthook->dynstr + idx;
         *addr_out = (void**)(plthook->plt_addr_base + plt->r_offset);
+        DEBUG_MSG("%s (%p)\n", *name_out, (void *)(*addr_out));
         return 0;
     }
     return -1;
