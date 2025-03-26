@@ -219,24 +219,41 @@ static void hook_function_calls_in_executable(enum open_mode open_mode)
     void *handle;
 
     switch (open_mode) {
-    case OPEN_MODE_DEFAULT:
-        CHK_PH(plthook_open(&plthook, NULL));
-        break;
-    case OPEN_MODE_BY_HANDLE:
+        case OPEN_MODE_DEFAULT:
+        {
+            CHK_PH(plthook_open(&plthook, NULL));
+            break;
+        }
+        case OPEN_MODE_BY_HANDLE:
+        {
 #ifdef WIN32
-        handle = GetModuleHandle(NULL);
+            handle = GetModuleHandle(NULL);
 #else
-        handle = dlopen(NULL, RTLD_LAZY);
+            handle = dlopen(NULL, RTLD_LAZY);
 #endif
-        assert(handle != NULL);
-        CHK_PH(plthook_open_by_handle(&plthook, handle));
-        break;
-    case OPEN_MODE_BY_ADDRESS:
-        CHK_PH(plthook_open_by_address(&plthook, &show_usage));
-        break;
+            assert(handle != NULL);
+            CHK_PH(plthook_open_by_handle(&plthook, handle));
+            break;
+        }
+        case OPEN_MODE_BY_ADDRESS:
+        {
+            union {
+                void (*fp)(const char *);
+                void *ptr;
+            } cast = { &show_usage };
+            CHK_PH(plthook_open_by_address(&plthook, cast.ptr));
+            break;
+        }
     }
     test_plthook_enum(plthook, funcs_called_by_main);
-    CHK_PH(plthook_replace(plthook, "strtod_cdecl", (void*)strtod_cdecl_hook_func, (void**)&strtod_cdecl_old_func));
+
+    {
+        union {
+            double (*fp)(const char *, char**);
+            void *ptr;
+        } cast = { &strtod_cdecl_hook_func };
+        CHK_PH(plthook_replace(plthook, "strtod_cdecl", cast.ptr, (void**)&strtod_cdecl_old_func));
+    }
 #if defined _WIN32 || defined __CYGWIN__
     CHK_PH(plthook_replace(plthook, "strtod_stdcall", (void*)strtod_stdcall_hook_func, (void**)&strtod_stdcall_old_func));
     CHK_PH(plthook_replace(plthook, "strtod_fastcall", (void*)strtod_fastcall_hook_func, (void**)&strtod_fastcall_old_func));
@@ -287,7 +304,13 @@ static void hook_function_calls_in_library(enum open_mode open_mode)
         break;
     }
     test_plthook_enum(plthook, funcs_called_by_libtest);
-    CHK_PH(plthook_replace(plthook, "strtod", (void*)strtod_hook_func, NULL));
+    {
+        union {
+            double (*fp)(const char *, char**);
+            void *ptr;
+        } cast = { &strtod_hook_func };
+        CHK_PH(plthook_replace(plthook, "strtod", cast.ptr, NULL));
+    }
     plthook_close(plthook);
 }
 
