@@ -188,7 +188,7 @@ typedef struct {
 static int plthook_open_real(plthook_t **plthook_out, uint32_t image_idx, const struct mach_header *mh, const char *image_name);
 static unsigned int set_bind_addrs(data_t *data, unsigned int idx, uint32_t bind_off, uint32_t bind_size, char weak);
 static void set_bind_addr(data_t *d, unsigned int *idx, const char *sym_name, int seg_index, int seg_offset, int addend, char weak);
-static int read_chained_fixups(data_t *d, const struct mach_header *mh, const char *image_name);
+static int read_chained_fixups(data_t *d, const char *image_name);
 #ifdef PLTHOOK_DEBUG_FIXUPS
 static const char *segment_name_from_addr(data_t *d, size_t addr);
 static const char *section_name_from_addr(data_t *d, size_t addr);
@@ -332,9 +332,11 @@ static int plthook_open_real(plthook_t **plthook_out, uint32_t image_idx, const 
     struct load_command *cmd;
     const struct dyld_info_command *dyld_info = NULL;
     unsigned int nbind;
-    data_t data = {NULL,};
+    data_t data;
     size_t size;
-    int i;
+    uint32_t i;
+
+    memset(&data, 0, sizeof(data_t));
 
     data.linkedit_segment_idx = -1;
     data.slide = _dyld_get_image_vmaddr_slide(image_idx);
@@ -533,7 +535,7 @@ static int plthook_open_real(plthook_t **plthook_out, uint32_t image_idx, const 
         return PLTHOOK_INVALID_FILE_FORMAT;
     }
     if (data.chained_fixups != NULL) {
-        int rv = read_chained_fixups(&data, mh, image_name);
+        int rv = read_chained_fixups(&data, image_name);
         if (rv != 0) {
             return rv;
         }
@@ -807,7 +809,7 @@ next_page:
     return 0;
 }
 
-static int read_chained_fixups(data_t *d, const struct mach_header *mh, const char *image_name)
+static int read_chained_fixups(data_t *d, const char *image_name)
 {
     const uint8_t *ptr = fileoff_to_vmaddr_in_segment(d, d->linkedit_segment_idx, d->chained_fixups->dataoff);
     const struct dyld_chained_fixups_header *header = (const struct dyld_chained_fixups_header *)ptr;
@@ -817,8 +819,10 @@ static int read_chained_fixups(data_t *d, const struct mach_header *mh, const ch
     size_t size;
     const struct dyld_chained_starts_in_image *starts = (const struct dyld_chained_starts_in_image *)(ptr + header->starts_offset);
     const struct dyld_chained_import *import = (const struct dyld_chained_import *)(ptr + header->imports_offset);
-    chained_fixups_iter_t iter = {NULL, };
+    chained_fixups_iter_t iter;
     chianed_fixups_entry_t entry;
+
+    memset(&iter, 0, sizeof(chained_fixups_iter_t));
 
     rv = chained_fixups_iter_init(&iter, image_name, starts);
     if (rv != 0) {

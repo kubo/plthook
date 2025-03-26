@@ -5,7 +5,11 @@
 UNAME_S := $(shell uname -s)
 
 CFLAGS_SHARED = -shared -fPIC
-CFLAGS_WARNING = -Wall -Wpedantic -Wextra
+ifeq ($(findstring clang,$(CC)),clang)
+CFLAGS_WARNING = -Weverything -Wpedantic
+else
+CFLAGS_WARNING = -Wall -Wextra -Wpedantic
+endif
 CFLAGS = $(CFLAGS_WARNING) $(EXTRA_CFLAGS) $(OPT_CFLAGS)
 LDFLAGS = $(EXTRA_LDFLAGS) $(OPT_LDFLAGS)
 EXEEXT =
