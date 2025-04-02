@@ -104,6 +104,9 @@
 #define R_GLOBAL_DATA R_RISCV_32
 #elif __riscv_xlen == 64
 #define R_GLOBAL_DATA R_RISCV_64
+#elif defined __loongarch64
+#define R_JUMP_SLOT   R_LARCH_JUMP_SLOT
+#define Elf_Plt_Rel   Elf_Rela
 #else
 #error unsupported RISCV implementation
 #endif
