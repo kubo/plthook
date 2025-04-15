@@ -899,7 +899,8 @@ int plthook_replace(plthook_t *plthook, const char *funcname, void *funcaddr, vo
                     }
                 }
                 if (oldfunc) {
-                    *oldfunc = *addr;
+                    void *prev = dlsym(RTLD_DEFAULT, funcname);
+                    *oldfunc = (prev != NULL) ? prev : *addr;
                 }
                 *addr = funcaddr;
                 if (!(prot & PROT_WRITE)) {
