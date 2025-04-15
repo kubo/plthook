@@ -84,7 +84,7 @@ jobs:
     - name: Install packages
       run: |
         sudo apt update
-        sudo apt install -y qemu-user gcc-arm-linux-gnueabi gcc-arm-linux-gnueabihf gcc-aarch64-linux-gnu gcc-powerpc-linux-gnu gcc-powerpc64le-linux-gnu gcc-riscv64-linux-gnu libc6-dev-armhf-cross libc6-dev-ppc64el-cross libc6-dev-powerpc-cross libc6-dev-armel-cross libc6-dev-arm64-cross
+        sudo apt install -y qemu-user gcc-arm-linux-gnueabi gcc-arm-linux-gnueabihf gcc-aarch64-linux-gnu gcc-powerpc-linux-gnu gcc-powerpc64le-linux-gnu gcc-riscv64-linux-gnu gcc-s390x-linux-gnu libc6-dev-armhf-cross libc6-dev-ppc64el-cross libc6-dev-powerpc-cross libc6-dev-armel-cross libc6-dev-arm64-cross libc6-dev-s390x-cross
     - name: Set OPT_CLFAGS
       run: |
         echo OPT_CFLAGS="${{ matrix.optimization }}" >> $GITHUB_ENV
@@ -115,6 +115,9 @@ jobs:
     - name: riscv64-linux-gnu
       run: |
         make relro_pie_tests TARGET_PLATFORM=riscv64-linux-gnu QEMU_ARCH=riscv64
+    - name: s390x-linux-gnu
+      run: |
+        make relro_pie_tests TARGET_PLATFORM=s390x-linux-gnu QEMU_ARCH=s390x
 
   tests_on_macos:
     name: Tests on macOS

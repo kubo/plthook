@@ -107,10 +107,18 @@
 #else
 #error unsupported RISCV implementation
 #endif
-#elif 0 /* disabled because not tested */ && (defined __sparcv9 || defined __sparc_v9__)
-#define R_JUMP_SLOT   R_SPARC_JMP_SLOT
+#elif 0 /* disabled because not tested */ && (defined __s390__)
+#define R_JUMP_SLOT   R_390_JMP_SLOT
+#define R_GLOBAL_DATA R_390_GLOB_DAT
+#elif defined __s390x__
+#define R_JUMP_SLOT   R_390_JMP_SLOT
+#define R_GLOBAL_DATA R_390_GLOB_DAT
 #elif 0 /* disabled because not tested */ && (defined __sparc || defined __sparc__)
 #define R_JUMP_SLOT   R_SPARC_JMP_SLOT
+#define R_GLOBAL_DATA R_SPARC_GLOB_DAT
+#elif 0 /* disabled because not tested */ && (defined __sparcv9 || defined __sparc_v9__)
+#define R_JUMP_SLOT   R_SPARC_JMP_SLOT
+#define R_GLOBAL_DATA R_SPARC_GLOB_DAT
 #elif 0 /* disabled because not tested */ && (defined __ia64 || defined __ia64__)
 #define R_JUMP_SLOT   R_IA64_IPLTMSB
 #else
