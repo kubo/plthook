@@ -18,7 +18,7 @@ ifeq ($(UNAME_S),Linux)
   # Linux
   TESTS = relro_pie_tests
   ifneq ($(TARGET_PLATFORM),)
-    CC = $(TARGET_PLATFORM)-gcc
+    CC = $(TARGET_PLATFORM)-gcc$(GCC_VERSION)
     KICK_CMD = qemu-$(or $(QEMU_ARCH),$(shell echo $(TARGET_PLATFORM) | sed -e 's/-.*//')) -L /usr/$(TARGET_PLATFORM)
   endif
 endif
