@@ -107,6 +107,9 @@
 #else
 #error unsupported RISCV implementation
 #endif
+#elif defined __loongarch64
+#define R_JUMP_SLOT   R_LARCH_JUMP_SLOT
+#define R_GLOBAL_DATA R_LARCH_64
 #elif 0 /* disabled because not tested */ && (defined __sparcv9 || defined __sparc_v9__)
 #define R_JUMP_SLOT   R_SPARC_JMP_SLOT
 #elif 0 /* disabled because not tested */ && (defined __sparc || defined __sparc__)
