@@ -73,7 +73,7 @@ jobs:
         ./uclibc-test.sh i686
 
   tests_on_qemu:
-    name: Tests on Qemu (arm, armhf, arm64, ppc, ppc64le and riscv64)
+    name: Tests on Qemu (arm, armhf, arm64, ppc, ppc64le, riscv64 and loongarch64)
     if: github.event.inputs.tests_on_qemu == 'true' || github.event.inputs.tests_on_qemu == ''
     runs-on: ubuntu-latest
     defaults:
@@ -84,7 +84,7 @@ jobs:
     - name: Install packages
       run: |
         sudo apt update
-        sudo apt install -y qemu-user gcc-arm-linux-gnueabi gcc-arm-linux-gnueabihf gcc-aarch64-linux-gnu gcc-powerpc-linux-gnu gcc-powerpc64le-linux-gnu gcc-riscv64-linux-gnu libc6-dev-armhf-cross libc6-dev-ppc64el-cross libc6-dev-powerpc-cross libc6-dev-armel-cross libc6-dev-arm64-cross
+        sudo apt install -y qemu-user gcc-arm-linux-gnueabi gcc-arm-linux-gnueabihf gcc-aarch64-linux-gnu gcc-powerpc-linux-gnu gcc-powerpc64le-linux-gnu gcc-riscv64-linux-gnu gcc-14-loongarch64-linux-gnu libc6-dev-armhf-cross libc6-dev-ppc64el-cross libc6-dev-powerpc-cross libc6-dev-armel-cross libc6-dev-arm64-cross
     - name: arm-linux-gnueabi without optimization
       run: |
         make relro_pie_tests TARGET_PLATFORM=arm-linux-gnueabi
@@ -103,6 +103,9 @@ jobs:
     - name: riscv64-linux-gnu without optimization
       run: |
         make relro_pie_tests TARGET_PLATFORM=riscv64-linux-gnu QEMU_ARCH=riscv64
+    - name: loongarch64-linux-gnu without optimization
+      run: |
+        make relro_pie_tests TARGET_PLATFORM=loongarch64-linux-gnu QEMU_ARCH=loongarch64
     - name: set OPT_CLFAGS
       run: |
         echo OPT_CFLAGS=-O3 >> $GITHUB_ENV
@@ -124,6 +127,9 @@ jobs:
     - name: riscv64-linux-gnu with optimization
       run: |
         make relro_pie_tests TARGET_PLATFORM=riscv64-linux-gnu QEMU_ARCH=riscv64
+    - name: loongarch64-linux-gnu with optimization
+      run: |
+        make relro_pie_tests TARGET_PLATFORM=loongarch64-linux-gnu QEMU_ARCH=loongarch64
 
   tests_on_macos:
     name: Tests on macOS
