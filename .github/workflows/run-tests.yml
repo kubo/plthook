@@ -127,7 +127,9 @@ jobs:
     - name: riscv64-linux-gnu with optimization
       run: |
         make relro_pie_tests TARGET_PLATFORM=riscv64-linux-gnu QEMU_ARCH=riscv64
-
+    - name: loongarch64-linux-gnu without optimization
+      run: |
+        make relro_pie_tests TARGET_PLATFORM=loongarch64-linux-gnu QEMU_ARCH=loongarch64 GCC_VERSION=-14
   tests_on_macos:
     name: Tests on macOS
     if: github.event.inputs.tests_on_macos == 'true' || github.event.inputs.tests_on_macos == ''

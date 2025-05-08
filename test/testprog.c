@@ -291,6 +291,7 @@ static void hook_function_calls_in_library(enum open_mode open_mode)
     plthook_close(plthook);
 }
 
+double lazy_binding_call();
 int main(int argc, char **argv)
 {
     double expected_result = strtod("3.7", NULL);
@@ -312,7 +313,8 @@ int main(int argc, char **argv)
     }
 
     /* Resolve the function addresses by lazy binding. */
-    strtod_cdecl("3.7", NULL);
+    lazy_binding_call();
+    //double num = strtod_cdecl("3.7", NULL);
 #if defined _WIN32 || defined __CYGWIN__
     strtod_stdcall("3.7", NULL);
     strtod_fastcall("3.7", NULL);
