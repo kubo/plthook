@@ -185,7 +185,7 @@ typedef struct {
 
 static int plthook_open_real(plthook_t **plthook_out, uint32_t image_idx, const struct mach_header *mh, const char *image_name);
 static unsigned int set_bind_addrs(data_t *data, unsigned int idx, uint32_t bind_off, uint32_t bind_size, char weak);
-static void set_bind_addr(data_t *d, unsigned int *idx, const char *sym_name, int seg_index, int seg_offset, int addend, char weak);
+static void set_bind_addr(data_t *d, unsigned int *idx, const char *sym_name, int seg_index, uint64_t seg_offset, int64_t addend, char weak);
 static int read_chained_fixups(data_t *d, const struct mach_header *mh, const char *image_name);
 #ifdef PLTHOOK_DEBUG_FIXUPS
 static const char *segment_name_from_addr(data_t *d, size_t addr);
@@ -334,7 +334,7 @@ static int plthook_open_real(plthook_t **plthook_out, uint32_t image_idx, const 
     unsigned int nbind;
     data_t data = {NULL,};
     size_t size;
-    int i;
+    uint32_t i;
 
     data.linkedit_segment_idx = -1;
     data.slide = _dyld_get_image_vmaddr_slide(image_idx);
@@ -567,8 +567,8 @@ static unsigned int set_bind_addrs(data_t *data, unsigned int idx, uint32_t bind
     const char *sym_name;
     int seg_index = 0;
     uint64_t seg_offset = 0;
-    int addend = 0;
-    int count, skip;
+    int64_t addend = 0;
+    uint64_t count, skip;
 #ifdef PLTHOOK_DEBUG_BIND
     int cond = data->plthook != NULL;
 #endif
@@ -576,7 +576,7 @@ static unsigned int set_bind_addrs(data_t *data, unsigned int idx, uint32_t bind
     while (ptr < end) {
         uint8_t op = *ptr & BIND_OPCODE_MASK;
         uint8_t imm = *ptr & BIND_IMMEDIATE_MASK;
-        int i;
+        uint64_t i;
 
         DEBUG_BIND_IF(cond, "0x%02x: ", *ptr);
         ptr++;
@@ -653,16 +653,16 @@ static unsigned int set_bind_addrs(data_t *data, unsigned int idx, uint32_t bind
     return idx;
 }
 
-static void set_bind_addr(data_t *data, unsigned int *idx, const char *sym_name, int seg_index, int seg_offset, int addend, char weak)
+static void set_bind_addr(data_t *data, unsigned int *idx, const char *sym_name, int seg_index, uint64_t seg_offset, int64_t addend, char weak)
 {
     if (data->plthook != NULL) {
         size_t vmaddr = data->segments[seg_index]->vmaddr;
         bind_address_t *bind_addr = &data->plthook->entries[*idx];
         bind_addr->name = sym_name;
-        bind_addr->addend = addend;
+        bind_addr->addend = (int)addend;
         bind_addr->weak = weak;
         bind_addr->addr = (void**)(vmaddr + data->slide + seg_offset);
-        DEBUG_BIND("bind_address[%u]: %s, %d, %d, %p, %p, %p\n", *idx, sym_name, seg_index, seg_offset, (void*)vmaddr, (void*)data->slide, bind_addr->addr);
+        DEBUG_BIND("bind_address[%u]: %s, %d, %lu, %p, %p, %p\n", *idx, sym_name, seg_index, seg_offset, (void*)vmaddr, (void*)data->slide, bind_addr->addr);
     }
     (*idx)++;
 }
