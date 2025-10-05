@@ -1,7 +1,9 @@
 PLTHook
 =======
 
-[![tests](https://github.com/kubo/plthook/actions/workflows/run-tests.yml/badge.svg)](https://github.com/kubo/plthook/actions/workflows/run-tests.yml)
+> [!CAUTION]
+> Due to a shift in my personal interests, this repository is no longer maintained and has been archived.
+> If you're looking for a successor project, please check [the network graph](https://github.com/kubo/plthook/network) to see if any forks have continued development.
 
 What is plthook.
 ----------------
