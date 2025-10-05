@@ -90,7 +90,8 @@ static void reset_result(void)
 
 static void set_result(hooked_val_t *hv, const char *str, double result)
 {
-    strncpy(hv->str, str, sizeof(hv->str));
+    strncpy(hv->str, str, sizeof(hv->str) - 1);
+    hv->str[sizeof(hv->str) - 1] = '\0';
     hv->result = result;
 }
 
