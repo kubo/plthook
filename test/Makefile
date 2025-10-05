@@ -85,7 +85,9 @@ relro_pie_tests:
 	$(MAKE) run_tests "CFLAGS_EXE=-fPIE -pie" "EXTRA_CFLAGS=-Wl,-z,relro,-z,now"
 	@echo ------------ check Partial RELRO + -fno-plt ------------
 	@touch dummy.c
-	@if $(CC) -c dummy.c -fno-plt; then \
+	@if test "$(TARGET_PLATFORM)" = "aarch64-linux-gnu"; then \
+	  echo "skip -fno-plt tests on aarch64-linux-gnu"; \
+	elif $(CC) -c dummy.c -fno-plt; then \
 	  $(MAKE) run_tests "EXTRA_CFLAGS=-Wl,-z,relro -fno-plt"; \
 	else \
 	  echo "skip: -fno-plt isn't supported"; \
