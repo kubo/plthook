@@ -130,7 +130,7 @@ jobs:
     if: github.event.inputs.tests_on_macos == 'true' || github.event.inputs.tests_on_macos == ''
     strategy:
       matrix:
-        os: [macos-12, macos-13, macos-14]
+        os: [macos-13, macos-14, macos-15]
     runs-on: ${{ matrix.os }}
     defaults:
       run:
