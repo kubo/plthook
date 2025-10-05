@@ -4,6 +4,7 @@ PLTHook
 > [!CAUTION]
 > Due to a shift in my personal interests, this repository is no longer maintained and has been archived.
 > If you're looking for a successor project, please check [the network graph](https://github.com/kubo/plthook/network) to see if any forks have continued development.
+> At the time of archiving, [metacall's fork](https://github.com/metacall/plthook) seems to be the best.
 
 What is plthook.
 ----------------
